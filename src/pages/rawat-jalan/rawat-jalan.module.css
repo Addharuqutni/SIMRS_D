@@ -1,0 +1,260 @@
+.emr {
+    animation: fadeIn 0.3s ease;
+}
+
+/* Patient Info Bar */
+.patientBar {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4) var(--space-5);
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.patientAvatar {
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, var(--primary), #6366f1);
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: var(--text-lg);
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.patientName {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    color: var(--text);
+}
+
+.patientMeta {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.patientTag {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.allergyTag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--danger-light);
+    color: #dc2626;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: 600;
+}
+
+/* SOAP Tabs */
+.soapTabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: var(--space-4);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.soapTab {
+    flex: 1;
+    padding: var(--space-3) var(--space-4);
+    text-align: center;
+    font-size: var(--text-base);
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border-right: 1px solid var(--border);
+    background: none;
+    border-top: none;
+    border-bottom: none;
+    border-left: none;
+}
+
+.soapTab:last-child {
+    border-right: none;
+}
+
+.soapTab:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+
+.soapTab.active {
+    background: var(--primary);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* SOAP Content */
+.soapContent {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    margin-bottom: var(--space-4);
+    animation: fadeIn 0.2s ease;
+}
+
+.soapSectionTitle {
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/* Vital Signs */
+.vitalsGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+}
+
+.vitalItem {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.vitalLabel {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.vitalInput {
+    height: 36px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg);
+    outline: none;
+    transition: border-color var(--transition-fast);
+    text-align: center;
+}
+
+.vitalInput:focus {
+    border-color: var(--primary);
+}
+
+.vitalUnit {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* Prescription Table */
+.prescriptionTable {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: var(--space-3);
+}
+
+.prescriptionTable th {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+}
+
+.prescriptionTable td {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.prescriptionTable input,
+.prescriptionTable select {
+    height: 32px;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+    width: 100%;
+}
+
+.prescriptionTable input:focus,
+.prescriptionTable select:focus {
+    border-color: var(--primary);
+}
+
+/* Order Buttons */
+.orderBtns {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+}
+
+/* EMR Actions */
+.emrActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+}
+
+/* Riwayat */
+.historyItem {
+    padding: var(--space-4);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-3);
+    background: var(--bg);
+}
+
+.historyDate {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: var(--space-2);
+}
+
+.historyDetail {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+.historyDetail strong {
+    color: var(--text);
+}
+
+@media (max-width: 767px) {
+    .vitalsGrid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .patientMeta {
+        gap: var(--space-2);
+    }
+}

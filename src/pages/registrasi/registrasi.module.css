@@ -1,0 +1,175 @@
+.page {
+    animation: fadeIn 0.3s ease;
+}
+
+.pageHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-5);
+    flex-wrap: wrap;
+    gap: var(--space-3);
+}
+
+.pageTitle {
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.toolbarSearch {
+    flex: 1;
+    min-width: 260px;
+}
+
+.tableWrapper {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.nameCell {
+    display: flex;
+    flex-direction: column;
+}
+
+.namePrimary {
+    font-weight: 500;
+    color: var(--text);
+}
+
+.nameSecondary {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.actionBtns {
+    display: flex;
+    gap: var(--space-1);
+}
+
+/* Form Page */
+.formPage {
+    animation: fadeIn 0.3s ease;
+}
+
+.backLink {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
+    cursor: pointer;
+    transition: color var(--transition-fast);
+}
+
+.backLink:hover {
+    color: var(--primary);
+}
+
+.formGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+}
+
+.formSection {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    padding: var(--space-5);
+    margin-bottom: var(--space-4);
+}
+
+.formSectionTitle {
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: var(--space-4);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.formRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.formRow3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.formActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border);
+}
+
+.bpjsStatus {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    margin-top: var(--space-2);
+}
+
+.bpjsActive {
+    background: var(--success-light);
+    color: #059669;
+}
+
+.sepCard {
+    background: linear-gradient(135deg, var(--primary-50), var(--primary-100));
+    border: 1px solid var(--primary-200);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    margin-top: var(--space-4);
+}
+
+.sepTitle {
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--primary-dark);
+    margin-bottom: var(--space-3);
+}
+
+.sepNumber {
+    font-family: var(--font-mono);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--text);
+}
+
+@media (max-width: 767px) {
+
+    .formRow,
+    .formRow3,
+    .formGrid {
+        grid-template-columns: 1fr;
+    }
+}

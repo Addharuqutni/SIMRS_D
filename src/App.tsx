@@ -4,6 +4,7 @@ import { queryClient } from './lib/query-client';
 import { AppLayout } from './components/layout';
 import { LoginPage } from './pages/login/LoginPage';
 import { RoleGuard } from './components/auth/RoleGuard';
+import { useSession } from './lib/auth-client';
 
 import React, { Suspense } from 'react';
 
@@ -34,15 +35,17 @@ const ManajemenUser = React.lazy(() => import('./pages/pengaturan/ManajemenUser'
 const MasterData = React.lazy(() => import('./pages/pengaturan/MasterData').then(m => ({ default: m.MasterData })));
 const KonfigurasiSistem = React.lazy(() => import('./pages/pengaturan/KonfigurasiSistem').then(m => ({ default: m.KonfigurasiSistem })));
 
-// Simple auth check
-function isAuthenticated() {
-  return !!localStorage.getItem('simrs_auth');
-}
-
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  if (!isAuthenticated()) {
+  const { data: session, isPending } = useSession();
+
+  if (isPending) {
+    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', color: '#64748b' }}>Memeriksa sesi...</div>;
+  }
+
+  if (!session) {
     return <Navigate to="/login" replace />;
   }
+
   return <>{children}</>;
 }
 

@@ -12,12 +12,12 @@ interface RoleGuardProps {
  * Redirects to their default page if not authorized.
  */
 export function RoleGuard({ children }: RoleGuardProps) {
-    const { data: session } = useSession();
+    const { data: session, isPending } = useSession();
     const location = useLocation();
-    const userRole = (session?.user as Record<string, any>)?.role || 'user';
+    const userRole = (session?.user as Record<string, unknown>)?.role as string | undefined || 'user';
 
-    // If session is still loading, show nothing (prevents flash)
-    if (!session) return null;
+    if (isPending) return null;
+    if (!session) return <Navigate to="/login" replace />;
 
     // Check RBAC
     if (!canAccess(userRole, location.pathname)) {

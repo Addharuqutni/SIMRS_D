@@ -5,7 +5,8 @@ import { visits, patients } from '../../db/schemas/patient';
 import { prescriptions, prescriptionItems } from '../../db/schemas/services';
 import { users } from '../../db/schemas/auth';
 import { eq, desc, and } from 'drizzle-orm';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, requireRole } from '../../middleware/auth';
+import { ROLE_GROUPS } from '../../utils/roles';
 import { validate } from '../../middleware/validate';
 import { saveSoapSchema, createPrescriptionSchema, createOrderSchema } from './schema';
 import { nanoid } from 'nanoid';
@@ -17,7 +18,7 @@ const router = Router();
 // ==========================================
 
 // GET Rawat Jalan Visits
-router.get('/rawat-jalan', requireAuth, async (req, res) => {
+router.get('/rawat-jalan', requireAuth, requireRole(...ROLE_GROUPS.clinical), async (req, res) => {
     try {
         const data = await db.select({
             id: visits.id,
@@ -41,7 +42,7 @@ router.get('/rawat-jalan', requireAuth, async (req, res) => {
 });
 
 // PUT Update Rawat Jalan Status
-router.put('/rawat-jalan/:id/status', requireAuth, async (req, res) => {
+router.put('/rawat-jalan/:id/status', requireAuth, requireRole(...ROLE_GROUPS.clinical), async (req, res) => {
     try {
         await db.update(visits).set({ status: req.body.status }).where(eq(visits.id, req.params.id));
         res.json({ success: true });
@@ -51,7 +52,7 @@ router.put('/rawat-jalan/:id/status', requireAuth, async (req, res) => {
 });
 
 // GET EMR SOAP for a visit
-router.get('/soap/:visitId', requireAuth, async (req, res) => {
+router.get('/soap/:visitId', requireAuth, requireRole(...ROLE_GROUPS.clinical), async (req, res) => {
     try {
         const data = await db.select().from(emrSoap).where(eq(emrSoap.visitId, req.params.visitId));
         res.json(data[0] || null);
@@ -61,7 +62,7 @@ router.get('/soap/:visitId', requireAuth, async (req, res) => {
 });
 
 // POST EMR SOAP for a visit
-router.post('/soap', requireAuth, validate(saveSoapSchema), async (req, res) => {
+router.post('/soap', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(saveSoapSchema), async (req, res) => {
     try {
         // Upsert logic (if exists, update, else insert)
         const existing = await db.select().from(emrSoap).where(eq(emrSoap.visitId, req.body.visitId));
@@ -84,7 +85,7 @@ router.post('/soap', requireAuth, validate(saveSoapSchema), async (req, res) => 
 });
 
 // POST E-Resep / Prescription
-router.post('/prescription', requireAuth, validate(createPrescriptionSchema), async (req, res) => {
+router.post('/prescription', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(createPrescriptionSchema), async (req, res) => {
     try {
         const { visitId, dokterId, items } = req.body;
 
@@ -117,7 +118,7 @@ router.post('/prescription', requireAuth, validate(createPrescriptionSchema), as
 });
 
 // POST Orders (Lab / Radiology)
-router.post('/orders/:type', requireAuth, validate(createOrderSchema), async (req, res) => {
+router.post('/orders/:type', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(createOrderSchema), async (req, res) => {
     try {
         const { type } = req.params;
         const { visitId, dokterId, jenisPemeriksaan, catatan } = req.body;
@@ -153,7 +154,7 @@ router.post('/orders/:type', requireAuth, validate(createOrderSchema), async (re
 // ==========================================
 
 // GET Rawat Inap Patients
-router.get('/rawat-inap', requireAuth, async (req, res) => {
+router.get('/rawat-inap', requireAuth, requireRole(...ROLE_GROUPS.clinical), async (req, res) => {
     try {
         const data = await db.select({
             id: rawatInapAdmisi.id,
@@ -178,7 +179,7 @@ router.get('/rawat-inap', requireAuth, async (req, res) => {
 });
 
 // POST Rawat Inap Admisi
-router.post('/rawat-inap/admisi', requireAuth, async (req, res) => {
+router.post('/rawat-inap/admisi', requireAuth, requireRole(...ROLE_GROUPS.clinical), async (req, res) => {
     try {
         // In real app, you might link to an existing visit or create a new one. 
         // Based on UI form (pasien, ruangan, kelas, dpjp), we will simulate full chain if needed.
@@ -217,7 +218,7 @@ router.post('/rawat-inap/admisi', requireAuth, async (req, res) => {
 });
 
 // PUT Update Rawat Inap Status
-router.put('/rawat-inap/:id/status', requireAuth, async (req, res) => {
+router.put('/rawat-inap/:id/status', requireAuth, requireRole(...ROLE_GROUPS.clinical), async (req, res) => {
     try {
         await db.update(rawatInapAdmisi)
             .set({

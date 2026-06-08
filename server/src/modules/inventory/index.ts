@@ -2,14 +2,15 @@ import { Router } from 'express';
 import { db } from '../../db';
 import { medicines, stockBatches, stockMutations } from '../../db/schemas/inventory';
 import { eq } from 'drizzle-orm';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, requireRole } from '../../middleware/auth';
+import { ROLE_GROUPS } from '../../utils/roles';
 import { validate } from '../../middleware/validate';
 import { createMedicineSchema, updateMedicineSchema, deleteMedicineSchema } from './schema';
 
 const router = Router();
 
 // GET all medicines
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), async (req, res) => {
     try {
         const data = await db.select().from(medicines);
         res.json(data);
@@ -18,7 +19,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 });
 // POST new medicine
-router.post('/', requireAuth, validate(createMedicineSchema), async (req, res) => {
+router.post('/', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(createMedicineSchema), async (req, res) => {
     try {
         const newItem = await db.insert(medicines).values(req.body).returning();
         res.status(201).json(newItem[0]);
@@ -28,7 +29,7 @@ router.post('/', requireAuth, validate(createMedicineSchema), async (req, res) =
 });
 
 // PUT update medicine
-router.put('/:kode', requireAuth, validate(updateMedicineSchema), async (req, res) => {
+router.put('/:kode', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(updateMedicineSchema), async (req, res) => {
     try {
         const kodeParam = req.params.kode as string;
         await db.update(medicines).set({ ...req.body, updatedAt: new Date() }).where(eq(medicines.kodeObat, kodeParam));
@@ -39,7 +40,7 @@ router.put('/:kode', requireAuth, validate(updateMedicineSchema), async (req, re
 });
 
 // DELETE medicine
-router.delete('/:kode', requireAuth, validate(deleteMedicineSchema), async (req, res) => {
+router.delete('/:kode', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(deleteMedicineSchema), async (req, res) => {
     try {
         const kodeParam = req.params.kode as string;
         // Optional: you can choose to soft-delete by changing status if there are FK constraints

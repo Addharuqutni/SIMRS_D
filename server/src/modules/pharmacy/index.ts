@@ -5,13 +5,14 @@ import { visits, patients } from '../../db/schemas/patient';
 import { users } from '../../db/schemas/auth';
 import { medicines, stockMutations } from '../../db/schemas/inventory';
 import { eq, desc } from 'drizzle-orm';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, requireRole } from '../../middleware/auth';
+import { ROLE_GROUPS } from '../../utils/roles';
 import { nanoid } from 'nanoid';
 
 const router = Router();
 
 // GET all prescriptions with patient and doctor details
-router.get('/prescriptions', requireAuth, async (req, res) => {
+router.get('/prescriptions', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), async (req, res) => {
     try {
         const query = await db.select({
             id: prescriptions.id,
@@ -39,7 +40,7 @@ router.get('/prescriptions', requireAuth, async (req, res) => {
 });
 
 // GET specific prescription with items
-router.get('/prescriptions/:id', requireAuth, async (req, res) => {
+router.get('/prescriptions/:id', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), async (req, res) => {
     try {
         const { id } = req.params;
         const presc = await db.select({
@@ -88,7 +89,7 @@ router.get('/prescriptions/:id', requireAuth, async (req, res) => {
 });
 
 // POST new prescription
-router.post('/prescriptions', requireAuth, async (req, res) => {
+router.post('/prescriptions', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), async (req, res) => {
     try {
         const { visitId, dokterId, items } = req.body;
 
@@ -123,7 +124,7 @@ router.post('/prescriptions', requireAuth, async (req, res) => {
 });
 
 // PUT update prescription status
-router.put('/prescriptions/:id/status', requireAuth, async (req, res) => {
+router.put('/prescriptions/:id/status', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;

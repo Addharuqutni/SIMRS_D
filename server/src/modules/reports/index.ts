@@ -2,13 +2,14 @@ import { Router, Request, Response } from 'express';
 import { db } from '../../db';
 import { billings, transactions } from '../../db/schemas/billing';
 import { visits } from '../../db/schemas/patient';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, requireRole } from '../../middleware/auth';
+import { ROLE_GROUPS } from '../../utils/roles';
 import { desc, sql, gte, lte, and } from 'drizzle-orm';
 
 const router = Router();
 
 // GET /api/v1/reports/finance/summary
-router.get('/finance/summary', requireAuth, async (req: Request, res: Response) => {
+router.get('/finance/summary', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req: Request, res: Response) => {
     try {
         const { startDate, endDate } = req.query;
 
@@ -40,7 +41,7 @@ router.get('/finance/summary', requireAuth, async (req: Request, res: Response) 
 });
 
 // GET /api/v1/reports/finance/export-csv
-router.get('/finance/export-csv', requireAuth, async (req: Request, res: Response) => {
+router.get('/finance/export-csv', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req: Request, res: Response) => {
     try {
         const { startDate, endDate } = req.query;
 
@@ -82,7 +83,7 @@ router.get('/finance/export-csv', requireAuth, async (req: Request, res: Respons
 });
 
 // GET /api/v1/reports/visits/export-csv
-router.get('/visits/export-csv', requireAuth, async (req: Request, res: Response) => {
+router.get('/visits/export-csv', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req: Request, res: Response) => {
     try {
         const data = await db.select().from(visits).orderBy(desc(visits.waktuDaftar));
 

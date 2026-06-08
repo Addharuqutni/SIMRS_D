@@ -3,11 +3,13 @@ import { db } from '../../db';
 import { users } from '../../db/schemas/auth';
 import { requireAuth } from '../../middleware/auth';
 import { eq, like } from 'drizzle-orm';
+import { requireRole } from '../../middleware/auth';
+import { ROLE_GROUPS } from '../../utils/roles';
 
 const router = Router();
 
 // GET all users
-router.get('/users', requireAuth, async (req, res) => {
+router.get('/users', requireAuth, requireRole(...ROLE_GROUPS.admin), async (req, res) => {
     try {
         const data = await db.select().from(users);
         res.json(data);
@@ -17,7 +19,7 @@ router.get('/users', requireAuth, async (req, res) => {
 });
 
 // POST new user
-router.post('/users', requireAuth, async (req, res) => {
+router.post('/users', requireAuth, requireRole(...ROLE_GROUPS.admin), async (req, res) => {
     try {
         const { nama, email, role, unit, status } = req.body;
         const newUserId = `USR-${Date.now()}`;
@@ -42,7 +44,7 @@ router.post('/users', requireAuth, async (req, res) => {
 });
 
 // PUT update user
-router.put('/users/:id', requireAuth, async (req, res) => {
+router.put('/users/:id', requireAuth, requireRole(...ROLE_GROUPS.admin), async (req, res) => {
     try {
         const { nama, email, role, unit, status } = req.body;
         await db.update(users)
@@ -56,7 +58,7 @@ router.put('/users/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE user
-router.delete('/users/:id', requireAuth, async (req, res) => {
+router.delete('/users/:id', requireAuth, requireRole(...ROLE_GROUPS.admin), async (req, res) => {
     try {
         await db.delete(users).where(eq(users.id, req.params.id));
         res.json({ success: true });

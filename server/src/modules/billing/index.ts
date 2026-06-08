@@ -6,13 +6,14 @@ import { prescriptions, prescriptionItems } from '../../db/schemas/services';
 import { labOrders, radiologyOrders } from '../../db/schemas/clinical';
 import { medicines } from '../../db/schemas/inventory';
 import { eq, desc } from 'drizzle-orm';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, requireRole } from '../../middleware/auth';
+import { ROLE_GROUPS } from '../../utils/roles';
 import { nanoid } from 'nanoid';
 
 const router = Router();
 
 // GET all billings
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req, res) => {
     try {
         const query = await db.select({
             id: billings.id,
@@ -40,7 +41,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // GET specific billing detail
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req, res) => {
     try {
         const { id } = req.params;
         const bill = await db.select({
@@ -69,7 +70,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // POST auto-generate billing from a highly structured visit
-router.post('/visit/:visitId/finalize', requireAuth, async (req, res) => {
+router.post('/visit/:visitId/finalize', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req, res) => {
     try {
         const { visitId } = req.params;
 
@@ -175,7 +176,7 @@ router.post('/visit/:visitId/finalize', requireAuth, async (req, res) => {
 });
 
 // PUT pay billing
-router.put('/:id/pay', requireAuth, async (req, res) => {
+router.put('/:id/pay', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req, res) => {
     try {
         const { id } = req.params;
         const { metodePembayaran } = req.body;
@@ -208,7 +209,7 @@ router.put('/:id/pay', requireAuth, async (req, res) => {
 });
 
 // GET all transactions for Laporan Keuangan
-router.get('/transactions', requireAuth, async (req, res) => {
+router.get('/transactions', requireAuth, requireRole(...ROLE_GROUPS.billing), async (req, res) => {
     try {
         const query = await db.select().from(transactions).orderBy(desc(transactions.tanggal));
         res.json(query);

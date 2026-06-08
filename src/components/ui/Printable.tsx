@@ -21,7 +21,7 @@ export const Printable: React.FC<PrintableProps> = ({
     const componentRef = useRef<HTMLDivElement>(null);
 
     const handlePrint = useReactToPrint({
-        content: () => componentRef.current,
+        contentRef: componentRef,
         documentTitle: title,
         pageStyle: `
             @page { size: auto; margin: 20mm; }

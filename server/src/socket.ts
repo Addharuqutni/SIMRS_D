@@ -17,6 +17,11 @@ export const initSocket = (server: http.Server, allowedOrigins: string[]) => {
         logger.info(`🔌 Client connected: ${socket.id}`);
 
         socket.on('join_room', (room: string) => {
+            const allowedRooms = [/^queue:/, /^notifications:/, /^unit:/];
+            if (!allowedRooms.some((pattern) => pattern.test(room))) {
+                logger.warn(`Rejected socket room join: ${room}`);
+                return;
+            }
             socket.join(room);
             logger.debug(`Socket ${socket.id} joined room ${room}`);
         });

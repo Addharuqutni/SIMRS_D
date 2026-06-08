@@ -23,6 +23,7 @@ import { laboratoryRouter } from './modules/laboratory';
 import { radiologyRouter } from './modules/radiology';
 import { pharmacyRouter } from './modules/pharmacy';
 import { logger } from './utils/logger';
+import { errorHandler, notFoundHandler } from './middleware/error';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -46,6 +47,7 @@ app.use('/api', apiLimiter);
 
 // CORS — allow frontend origin with credentials (cookies)
 const frontendUrls = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(url => url.trim()) : [];
+const isProduction = process.env.NODE_ENV === 'production';
 const allowedOrigins = [
     ...frontendUrls,
     'http://localhost:5173', 'http://localhost:5174',
@@ -57,7 +59,11 @@ app.use(cors({
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            callback(null, true); // allow all for dev
+            if (isProduction) {
+                callback(new Error('Not allowed by CORS'));
+            } else {
+                callback(null, true);
+            }
         }
     },
     credentials: true,
@@ -104,6 +110,9 @@ app.use('/api/v1/pharmacy', pharmacyRouter);
 app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', message: 'SIMRS Backend is running', timestamp: new Date() });
 });
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 // Start server
 httpServer.listen(port, () => {

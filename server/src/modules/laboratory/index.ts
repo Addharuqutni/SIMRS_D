@@ -4,12 +4,13 @@ import { labOrders } from '../../db/schemas/clinical';
 import { users } from '../../db/schemas/auth';
 import { visits, patients } from '../../db/schemas/patient';
 import { eq } from 'drizzle-orm';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, requireRole } from '../../middleware/auth';
+import { ROLE_GROUPS } from '../../utils/roles';
 
 const router = Router();
 
 // GET all lab orders
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireRole(...ROLE_GROUPS.lab), async (req, res) => {
     try {
         const data = await db.select({
             id: labOrders.id,
@@ -38,7 +39,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // POST new lab order
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, requireRole(...ROLE_GROUPS.lab), async (req, res) => {
     try {
         const newOrder = await db.insert(labOrders).values({
             ...req.body,
@@ -52,7 +53,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // PUT update lab order (hasil/status)
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, requireRole(...ROLE_GROUPS.lab), async (req, res) => {
     try {
         const updateData = { ...req.body };
         if (updateData.status === 'selesai' && !updateData.waktuSelesai) {
@@ -69,7 +70,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE lab order (cancel)
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, requireRole(...ROLE_GROUPS.lab), async (req, res) => {
     try {
         const idParam = req.params.id as string;
         await db.delete(labOrders).where(eq(labOrders.id, idParam));

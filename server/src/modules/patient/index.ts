@@ -2,70 +2,21 @@ import { Router } from 'express';
 import { db } from '../../db';
 import { patients, visits } from '../../db/schemas/patient';
 import { users } from '../../db/schemas/auth';
-import { eq, sql, max, and, gte, lt } from 'drizzle-orm';
-import { requireAuth } from '../../middleware/auth';
+import { eq, max, and, gte, lt, isNull } from 'drizzle-orm';
+import { requireAuth, requireRole } from '../../middleware/auth';
 import { queues } from '../../db/schemas/schedule';
+import { validate } from '../../middleware/validate';
+import { ROLE_GROUPS } from '../../utils/roles';
+import { createPatientSchema, createVisitSchema, patientRmParamSchema, updatePatientSchema, visitIdParamSchema } from './schema';
 
 const router = Router();
 
-// GET all patients
-router.get('/', requireAuth, async (req, res) => {
-    try {
-        const allPatients = await db.select().from(patients);
-        res.json(allPatients);
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to fetch patients', details: error.message });
-    }
-});
+const patientReadRoles = [...ROLE_GROUPS.registration, ...ROLE_GROUPS.clinical, ...ROLE_GROUPS.billing, ...ROLE_GROUPS.pharmacy, ...ROLE_GROUPS.lab];
+const patientWriteRoles = ROLE_GROUPS.registration;
 
-// POST new patient
-router.post('/', requireAuth, async (req, res) => {
+// GET all visits (registrations) — keep before /:rm
+router.get('/visits/all', requireAuth, requireRole(...patientReadRoles), async (req, res, next) => {
     try {
-        const newPatient = await db.insert(patients).values(req.body).returning();
-        res.status(201).json(newPatient[0]);
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to create patient', details: error.message });
-    }
-});
-
-// GET patient by RM
-router.get('/:rm', requireAuth, async (req, res) => {
-    try {
-        const rmParam = req.params.rm as string;
-        const patient = await db.select().from(patients).where(eq(patients.rm, rmParam));
-        if (!patient.length) return res.status(404).json({ error: 'Patient not found' });
-        res.json(patient[0]);
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to fetch patient', details: error.message });
-    }
-});
-
-// PUT update patient by RM
-router.put('/:rm', requireAuth, async (req, res) => {
-    try {
-        const rmParam = req.params.rm as string;
-        await db.update(patients).set({ ...req.body, updatedAt: new Date() }).where(eq(patients.rm, rmParam));
-        res.json({ success: true });
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to update patient', details: error.message });
-    }
-});
-
-// DELETE patient (Soft Delete)
-router.delete('/:rm', requireAuth, async (req, res) => {
-    try {
-        const rmParam = req.params.rm as string;
-        await db.update(patients).set({ deletedAt: new Date() }).where(eq(patients.rm, rmParam));
-        res.json({ success: true, message: 'Patient logically deleted' });
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to delete patient', details: error.message });
-    }
-});
-
-// GET all visits (registrations)
-router.get('/visits/all', requireAuth, async (req, res) => {
-    try {
-        // Simple join to get visit + patient info
         const data = await db.select({
             id: visits.id,
             nama: patients.nama,
@@ -82,68 +33,158 @@ router.get('/visits/all', requireAuth, async (req, res) => {
             .leftJoin(users, eq(visits.dokterId, users.id));
 
         res.json(data);
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to fetch visits', details: error.message });
+    } catch (error) {
+        next(error);
     }
 });
 
 // POST new visit (registration)
-router.post('/visits', requireAuth, async (req, res) => {
+router.post('/visits', requireAuth, requireRole(...patientWriteRoles), validate(createVisitSchema), async (req, res, next) => {
     try {
-        const newVisit = await db.insert(visits).values(req.body).returning();
-        const visit = newVisit[0];
+        const body = req.body;
+        const visit = await db.transaction(async (tx) => {
+            const newVisit = await tx.insert(visits).values({
+                id: body.id || `VIS-${Date.now()}`,
+                patientId: body.patientId,
+                poliId: body.poliId,
+                dokterId: body.dokterId,
+                jaminan: body.jaminan,
+                status: body.status || 'menunggu',
+                tipeKunjungan: body.tipeKunjungan,
+            }).returning();
 
-        // Also generate a Queue ticket (Antrean) for this visit
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
+            const createdVisit = newVisit[0];
 
-        // Map poli to a queue code letter
-        const poliPrefixes: Record<string, string> = {
-            'Poli Umum': 'A',
-            'Poli Gigi': 'B',
-            'Poli Anak': 'C',
-            'Poli Kandungan': 'D',
-            'IGD': 'E'
-        };
-        const queueCode = poliPrefixes[visit.poliId] || 'P';
+            const startOfDay = new Date();
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date();
+            endOfDay.setHours(23, 59, 59, 999);
 
-        // Calculate next queue number for this poli today
-        const queueStats = await db.select({ maxNum: max(queues.queueNumber) })
-            .from(queues)
-            .where(
-                and(
-                    eq(queues.poliId, visit.poliId),
-                    gte(queues.createdAt, startOfDay),
-                    lt(queues.createdAt, endOfDay)
-                )
-            );
-        const nextNumber = (queueStats[0]?.maxNum || 0) + 1;
+            const poliPrefixes: Record<string, string> = {
+                'Poli Umum': 'A',
+                'Poli Gigi': 'B',
+                'Poli Anak': 'C',
+                'Poli Kandungan': 'D',
+                'IGD': 'E'
+            };
+            const queueCode = poliPrefixes[createdVisit.poliId] || 'P';
 
-        await db.insert(queues).values({
-            visitId: visit.id,
-            poliId: visit.poliId,
-            loket: visit.poliId,
-            queueNumber: nextNumber,
-            queueCode: `${queueCode}-${String(nextNumber).padStart(3, '0')}`,
-            status: 'menunggu'
+            const queueStats = await tx.select({ maxNum: max(queues.queueNumber) })
+                .from(queues)
+                .where(
+                    and(
+                        eq(queues.poliId, createdVisit.poliId),
+                        gte(queues.createdAt, startOfDay),
+                        lt(queues.createdAt, endOfDay)
+                    )
+                );
+            const nextNumber = (queueStats[0]?.maxNum || 0) + 1;
+
+            await tx.insert(queues).values({
+                visitId: createdVisit.id,
+                poliId: createdVisit.poliId,
+                loket: createdVisit.poliId,
+                queueNumber: nextNumber,
+                queueCode: `${queueCode}-${String(nextNumber).padStart(3, '0')}`,
+                status: 'menunggu'
+            });
+
+            return createdVisit;
         });
 
         res.status(201).json(visit);
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to create visit registration', details: error.message });
+    } catch (error) {
+        next(error);
     }
 });
 
 // DELETE visit (registration) soft delete
-router.delete('/visits/:id', requireAuth, async (req, res) => {
+router.delete('/visits/:id', requireAuth, requireRole(...patientWriteRoles), validate(visitIdParamSchema), async (req, res, next) => {
     try {
-        const visitId = req.params.id as string;
-        await db.update(visits).set({ status: 'batal' }).where(eq(visits.id, visitId));
+        await db.update(visits).set({ status: 'batal' }).where(eq(visits.id, req.params.id));
         res.json({ success: true, message: 'Visit cancelled successfully' });
-    } catch (error: any) {
-        res.status(500).json({ error: 'Failed to delete visit', details: error.message });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// GET all patients
+router.get('/', requireAuth, requireRole(...patientReadRoles), async (req, res, next) => {
+    try {
+        const allPatients = await db.select().from(patients).where(isNull(patients.deletedAt));
+        res.json(allPatients);
+    } catch (error) {
+        next(error);
+    }
+});
+
+// POST new patient
+router.post('/', requireAuth, requireRole(...patientWriteRoles), validate(createPatientSchema), async (req, res, next) => {
+    try {
+        const body = req.body;
+        const newPatient = await db.insert(patients).values({
+            id: body.id || `PAT-${Date.now()}`,
+            rm: body.rm,
+            nik: body.nik,
+            nama: body.nama,
+            tempatLahir: body.tempatLahir,
+            tanggalLahir: body.tanggalLahir,
+            gender: body.gender,
+            goldar: body.goldar,
+            agama: body.agama,
+            alamat: body.alamat,
+            telepon: body.telepon,
+            pekerjaan: body.pekerjaan,
+            alergi: body.alergi,
+        }).returning();
+        res.status(201).json(newPatient[0]);
+    } catch (error) {
+        next(error);
+    }
+});
+
+// GET patient by RM
+router.get('/:rm', requireAuth, requireRole(...patientReadRoles), validate(patientRmParamSchema), async (req, res, next) => {
+    try {
+        const patient = await db.select().from(patients).where(and(eq(patients.rm, req.params.rm), isNull(patients.deletedAt)));
+        if (!patient.length) return res.status(404).json({ error: 'Patient not found' });
+        res.json(patient[0]);
+    } catch (error) {
+        next(error);
+    }
+});
+
+// PUT update patient by RM
+router.put('/:rm', requireAuth, requireRole(...patientWriteRoles), validate(updatePatientSchema), async (req, res, next) => {
+    try {
+        const body = req.body;
+        await db.update(patients).set({
+            nik: body.nik,
+            nama: body.nama,
+            tempatLahir: body.tempatLahir,
+            tanggalLahir: body.tanggalLahir,
+            gender: body.gender,
+            goldar: body.goldar,
+            agama: body.agama,
+            alamat: body.alamat,
+            telepon: body.telepon,
+            pekerjaan: body.pekerjaan,
+            alergi: body.alergi,
+            updatedAt: new Date()
+        }).where(eq(patients.rm, req.params.rm));
+        res.json({ success: true });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// DELETE patient (Soft Delete)
+router.delete('/:rm', requireAuth, requireRole(...patientWriteRoles), validate(patientRmParamSchema), async (req, res, next) => {
+    try {
+        await db.update(patients).set({ deletedAt: new Date() }).where(eq(patients.rm, req.params.rm));
+        res.json({ success: true, message: 'Patient logically deleted' });
+    } catch (error) {
+        next(error);
     }
 });
 

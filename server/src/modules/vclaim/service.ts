@@ -1,12 +1,22 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 
-// Mock Config for development (in real world these will come from env)
+const BPJS_MODE = process.env.BPJS_MODE || 'mock';
+
+if (!['mock', 'production'].includes(BPJS_MODE)) {
+    throw new Error('Invalid BPJS_MODE. Use mock or production.');
+}
+
+if (BPJS_MODE === 'production' && (!process.env.BPJS_CONSID || !process.env.BPJS_SECRET || !process.env.BPJS_USER_KEY)) {
+    throw new Error('BPJS production mode requires BPJS_CONSID, BPJS_SECRET, and BPJS_USER_KEY.');
+}
+
 const BPJS_CONFIG = {
     baseURL: process.env.BPJS_API_URL || 'https://vclaim.bpjs-kesehatan.go.id/vclaim-rest',
-    consid: process.env.BPJS_CONSID || '12345',
-    secretKey: process.env.BPJS_SECRET || 'secret123',
-    userKey: process.env.BPJS_USER_KEY || 'userkey123',
-    timeout: 5000, // 5 seconds timeout requirement
+    mode: BPJS_MODE,
+    consid: process.env.BPJS_CONSID || '',
+    secretKey: process.env.BPJS_SECRET || '',
+    userKey: process.env.BPJS_USER_KEY || '',
+    timeout: 5000,
 };
 
 class BpjsService {
@@ -19,89 +29,66 @@ class BpjsService {
             headers: {
                 'X-cons-id': BPJS_CONFIG.consid,
                 'X-timestamp': Math.floor(Date.now() / 1000).toString(),
-                'X-signature': 'MOCK_SIGNATURE', // Normally uses crypto to sign
+                'X-signature': BPJS_CONFIG.mode === 'mock' ? 'MOCK_SIGNATURE' : '',
                 'user_key': BPJS_CONFIG.userKey,
             }
         });
 
-        // Add retry mechanism and logging via intercepts
         this.client.interceptors.response.use(
-            (response) => {
-                console.log(`[BPJS Service] Success ${response.config.url}`);
-                return response;
-            },
+            (response) => response,
             async (error: AxiosError) => {
-                const config: any = error.config;
+                const config = error.config as (typeof error.config & { _retryCount?: number });
                 if (!config) return Promise.reject(error);
 
                 config._retryCount = config._retryCount || 0;
 
-                // Max 2 retries on network timeout or 500 errors
                 if (config._retryCount < 2 && (error.code === 'ECONNABORTED' || (error.response && error.response.status >= 500))) {
                     config._retryCount += 1;
-                    console.warn(`[BPJS Service] Retry ${config._retryCount} for ${config.url}`);
-
-                    // Wait 1 second before retry
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     return this.client(config);
                 }
 
-                console.error(`[BPJS Service] Failed ${config.url} after ${config._retryCount} retries`, error.message);
                 return Promise.reject(error);
             }
         );
     }
 
-    /**
-     * MOCK FUNCTION: Validasi Nomor Kartu BPJS
-     */
     async validateCard(noKartu: string, date: string) {
-        try {
-            // For true implementation:
-            // const res = await this.client.get(`/Peserta/nokartu/${noKartu}/tglSEP/${date}`);
-            // return res.data;
-
-            // Mock implementation: Simulate network delay 500ms
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            return {
-                metaData: { code: '200', message: 'OK' },
-                response: {
-                    peserta: {
-                        noKartu,
-                        nama: 'Mock Pasien',
-                        statusPeserta: { keterangan: 'AKTIF' }
-                    }
-                }
-            };
-        } catch (error) {
-            throw error;
+        if (BPJS_CONFIG.mode === 'production') {
+            throw new Error('BPJS production validateCard is not implemented yet.');
         }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        return {
+            metaData: { code: '200', message: 'OK' },
+            response: {
+                peserta: {
+                    noKartu,
+                    tglSep: date,
+                    nama: 'Mock Pasien',
+                    statusPeserta: { keterangan: 'AKTIF' }
+                }
+            }
+        };
     }
 
-    /**
-     * MOCK FUNCTION: Create SEP BPJS
-     */
-    async insertSEP(payload: any) {
-        try {
-            // For true implementation:
-            // const res = await this.client.post('/SEP/1.1/insert', payload);
-            // return res.data;
-
-            await new Promise(resolve => setTimeout(resolve, 800));
-
-            return {
-                metaData: { code: '200', message: 'OK' },
-                response: {
-                    sep: {
-                        noSep: `SEP-${Date.now()}`,
-                        tglSep: payload.request?.tglSep || new Date().toISOString().split('T')[0],
-                    }
-                }
-            };
-        } catch (error) {
-            throw error;
+    async insertSEP(payload: { request?: { tglSep?: string } }) {
+        if (BPJS_CONFIG.mode === 'production') {
+            throw new Error('BPJS production insertSEP is not implemented yet.');
         }
+
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+        return {
+            metaData: { code: '200', message: 'OK' },
+            response: {
+                sep: {
+                    noSep: `SEP-${Date.now()}`,
+                    tglSep: payload.request?.tglSep || new Date().toISOString().split('T')[0],
+                }
+            }
+        };
     }
 }
 

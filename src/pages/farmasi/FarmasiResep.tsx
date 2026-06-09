@@ -39,7 +39,7 @@ export function FarmasiResep() {
         try {
             await updateMutation.mutateAsync({ id: selectedId, status: 'proses' });
             showToast(`Resep ${detail?.noResep} diterima dan sedang diproses`, 'info');
-        } catch (e) {
+        } catch {
             showToast('Gagal memproses resep', 'danger');
         }
     };
@@ -48,7 +48,7 @@ export function FarmasiResep() {
         try {
             await updateMutation.mutateAsync({ id: selectedId, status: 'selesai' });
             showToast(`Obat resep ${detail?.noResep} berhasil diserahkan dan mutasi stok dicatat`, 'success');
-        } catch (e) {
+        } catch {
             showToast('Gagal menyerahkan resep', 'danger');
         }
     };

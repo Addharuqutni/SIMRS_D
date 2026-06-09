@@ -43,7 +43,7 @@ export function RawatJalanList() {
         try {
             await updateVisitStatus.mutateAsync({ id: patient.id, status: 'pemeriksaan' });
             showToast(`Pemeriksaan dimulai untuk ${patient.nama}`, 'info');
-        } catch (error) {
+        } catch {
             showToast('Gagal merubah status pasien', 'danger');
         }
     };
@@ -52,7 +52,7 @@ export function RawatJalanList() {
         try {
             await updateVisitStatus.mutateAsync({ id: patient.id, status: 'selesai' });
             showToast(`Pemeriksaan ${patient.nama} telah selesai`, 'success');
-        } catch (error) {
+        } catch {
             showToast('Gagal menyelesaikan pemeriksaan', 'danger');
         }
     };

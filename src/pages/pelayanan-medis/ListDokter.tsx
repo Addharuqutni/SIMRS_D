@@ -21,7 +21,7 @@ export function ListDokter() {
         if (doctorUsers.length > 0 && users.length === 0) {
             setUsers(doctorUsers);
         }
-    }, [dbUsers, doctorUsers]);
+    }, [doctorUsers, users.length]);
 
     const currentList = users.length > 0 ? users : doctorUsers;
 

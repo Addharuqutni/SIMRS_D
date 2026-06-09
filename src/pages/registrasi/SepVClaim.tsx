@@ -50,7 +50,7 @@ export function SepVClaim() {
             showToast(`SEP berhasil dibuat untuk ${form.pasien}`, 'success');
             setModalOpen(false);
             setForm(emptyForm);
-        } catch (e) {
+        } catch {
             showToast('Gagal membuat SEP BPJS', 'danger');
         }
     };
@@ -60,7 +60,7 @@ export function SepVClaim() {
             try {
                 await cancelMutation.mutateAsync(sep.noSep);
                 showToast(`SEP ${sep.noSep} telah dibatalkan`, 'warning');
-            } catch (e) {
+            } catch {
                 showToast('Gagal membatalkan SEP', 'danger');
             }
         }

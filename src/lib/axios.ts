@@ -12,8 +12,6 @@ api.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401) {
-            // Unauthenticated
-            localStorage.removeItem('simrs_auth');
             window.location.href = '/login';
         }
         return Promise.reject(error);

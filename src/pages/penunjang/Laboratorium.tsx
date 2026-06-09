@@ -53,7 +53,7 @@ export function Laboratorium() {
         try {
             await updateMutation.mutateAsync({ id: order.id, data: { status: 'diproses' } });
             showToast(`Sampel "${order.id}" telah diterima & diproses`, 'success');
-        } catch (error) {
+        } catch {
             showToast('Gagal memproses order', 'danger');
         }
     };
@@ -82,7 +82,7 @@ export function Laboratorium() {
                     }
                 });
                 showToast(`Hasil lab "${inputTarget.id}" berhasil diinput & divalidasi`, 'success');
-            } catch (error) {
+            } catch {
                 showToast('Gagal menyimpan hasil lab', 'danger');
             }
         }
@@ -109,7 +109,7 @@ export function Laboratorium() {
             showToast(`Order lab baru berhasil dibuat`, 'success');
             setAddOpen(false);
             setAddForm(emptyOrder);
-        } catch (error) {
+        } catch {
             showToast('Gagal menambah order lab', 'danger');
         }
     };
@@ -334,7 +334,7 @@ export function Laboratorium() {
                         await deleteMutation.mutateAsync(deleteModal.id);
                         showToast(`Order ${deleteModal.id} berhasil dibatalkan`, 'success');
                         setDeleteModal({ open: false, id: '' });
-                    } catch (error) {
+                    } catch {
                         showToast('Gagal membatalkan order', 'danger');
                     }
                 }}

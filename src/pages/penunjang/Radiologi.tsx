@@ -53,7 +53,7 @@ export function Radiologi() {
         try {
             await updateMutation.mutateAsync({ id: order.id, data: { status: 'diproses' } });
             showToast(`Pemeriksaan "${order.id}" telah dilaksanakan, menunggu expertise`, 'success');
-        } catch (err) {
+        } catch {
             showToast('Gagal memproses pemeriksaan radiologi', 'danger');
         }
     };
@@ -82,7 +82,7 @@ export function Radiologi() {
                     }
                 });
                 showToast(`Expertise "${expertiseTarget.id}" berhasil disimpan`, 'success');
-            } catch (err) {
+            } catch {
                 showToast('Gagal menyimpan expertise', 'danger');
             }
         }
@@ -342,7 +342,7 @@ export function Radiologi() {
                         await deleteMutation.mutateAsync(deleteModal.id);
                         showToast(`Order ${deleteModal.id} berhasil dibatalkan`, 'success');
                         setDeleteModal({ open: false, id: '' });
-                    } catch (error) {
+                    } catch {
                         showToast('Gagal membatalkan order', 'danger');
                     }
                 }}

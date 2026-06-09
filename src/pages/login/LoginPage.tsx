@@ -36,12 +36,9 @@ export function LoginPage() {
             if (result.error) {
                 setError(result.error.message || 'Login gagal, periksa email dan password.');
             } else {
-                // Populate temporary Auth data for Navbar based on signed in user
-                const user = (result.data?.user as any) || { name: username, role: 'Superadmin' };
-                localStorage.setItem('simrs_auth', JSON.stringify({ user: user.name, role: user.role }));
                 navigate('/dashboard');
             }
-        } catch (err) {
+        } catch {
             setError('Koneksi ke server bermasalah');
         } finally {
             setLoading(false);

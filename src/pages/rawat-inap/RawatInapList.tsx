@@ -51,7 +51,7 @@ export function RawatInapList() {
             showToast(`Pasien "${form.pasien}" berhasil diadmisi ke ${form.ruangan}`, 'success');
             setAdmisiOpen(false);
             setForm(emptyAdmisi);
-        } catch (error) {
+        } catch {
             showToast('Gagal memproses admisi', 'danger');
         }
     };
@@ -62,7 +62,7 @@ export function RawatInapList() {
             await updateStatus.mutateAsync({ id: pulangTarget.id, status: 'rencana_pulang' });
             showToast(`Pasien "${pulangTarget.pasien}" direncanakan pulang`, 'success');
             setPulangOpen(false);
-        } catch (error) {
+        } catch {
             showToast('Gagal mengubah status pasien', 'danger');
         }
     };

@@ -17,7 +17,7 @@ export function Antrean() {
         try {
             await nextMutation.mutateAsync(target.poli);
             showToast(`Memanggil nomor urut selanjutnya di ${target.poli}`, 'success');
-        } catch (error) {
+        } catch {
             showToast(`Gagal memanggil antrean di ${target.poli}`, 'danger');
         }
     };

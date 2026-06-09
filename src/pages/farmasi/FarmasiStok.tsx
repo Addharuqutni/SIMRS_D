@@ -100,7 +100,7 @@ export function FarmasiStok() {
             showToast(`Item "${addForm.nama}" berhasil ditambahkan`, 'success');
             setAddOpen(false);
             setAddForm(emptyItem);
-        } catch (error) {
+        } catch {
             showToast('Gagal menambahkan item inventaris', 'danger');
         }
     };
@@ -113,7 +113,7 @@ export function FarmasiStok() {
             showToast(`Item "${editItem.nama}" berhasil diperbarui`, 'success');
             setEditOpen(false);
             setEditItem(null);
-        } catch (error) {
+        } catch {
             showToast('Gagal memperbarui item inventaris', 'danger');
         }
     };
@@ -126,7 +126,7 @@ export function FarmasiStok() {
             showToast(`Item "${deleteTarget.nama}" berhasil dihapus`, 'success');
             setDeleteOpen(false);
             setDeleteTarget(null);
-        } catch (error) {
+        } catch {
             showToast('Gagal menghapus item inventaris', 'danger');
         }
     };

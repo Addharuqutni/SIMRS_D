@@ -38,7 +38,7 @@ export function KlaimBpjs() {
         try {
             await updateMutation.mutateAsync({ noSep: klaim.noSep, status: 'pending' });
             showToast(`Klaim ${klaim.noSep} dikirim ke BPJS untuk verifikasi`, 'info');
-        } catch (e) {
+        } catch {
             showToast('Gagal mengirim klaim BPJS', 'danger');
         }
     };
@@ -47,7 +47,7 @@ export function KlaimBpjs() {
         try {
             await updateMutation.mutateAsync({ noSep: klaim.noSep, status: 'pending' });
             showToast(`Dispute ${klaim.noSep} diselesaikan dan dikirim ulang`, 'success');
-        } catch (e) {
+        } catch {
             showToast('Gagal mengubah status klaim', 'danger');
         }
     };

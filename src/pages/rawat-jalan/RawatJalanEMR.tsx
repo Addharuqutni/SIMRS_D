@@ -55,7 +55,7 @@ export function RawatJalanEMR() {
         try {
             await saveSoap.mutateAsync({ visitId, dokterId: patient.dokterId, ...soapForm });
             showToast('Draft SOAP berhasil tersimpan', 'success');
-        } catch (error) {
+        } catch {
             showToast('Gagal menyimpan draft SOAP', 'danger');
         }
     };
@@ -83,7 +83,7 @@ export function RawatJalanEMR() {
             await updateVisitStatus.mutateAsync({ id: visitId, status: 'selesai' });
             showToast('Pemeriksaan selesai — data dikirim ke Farmasi & Billing', 'success');
             navigate('/rawat-jalan');
-        } catch (error) {
+        } catch {
             showToast('Gagal menyelesaikan pemeriksaan', 'danger');
         }
     };
@@ -101,7 +101,7 @@ export function RawatJalanEMR() {
                 }
             });
             showToast(`Order ${type === 'lab' ? 'laboratorium' : 'radiologi'} dikirim`, 'info');
-        } catch (e) {
+        } catch {
             showToast(`Gagal order ${type}`, 'danger');
         }
     };

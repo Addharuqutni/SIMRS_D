@@ -117,7 +117,7 @@ export function Sidebar({ collapsed, mobileOpen, onCloseMobile }: SidebarProps) 
         .join(' ');
 
     const { data: session } = useSession();
-    const userRole = (session?.user as Record<string, any>)?.role || 'user';
+    const userRole = ((session?.user as Record<string, unknown>)?.role as string | undefined) || 'user';
 
     // Filter nav groups and items using the centralized RBAC config
     const renderNavGroups = navGroups

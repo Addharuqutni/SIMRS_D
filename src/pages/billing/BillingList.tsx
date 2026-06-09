@@ -46,7 +46,7 @@ export function BillingList() {
             showToast(`Pembayaran "${paymentTarget.noBilling}" berhasil dicatat (${paymentMethod})`, 'success');
             setPaymentOpen(false);
             setPaymentTarget(null);
-        } catch (e) {
+        } catch {
             showToast('Gagal memproses pembayaran kasir', 'danger');
         }
     };

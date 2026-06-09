@@ -97,11 +97,11 @@ export function KonfigurasiSistem() {
                                     </h4>
                                     <div className={uiStyles.formGroup} style={{ marginBottom: '12px' }}>
                                         <label className={uiStyles.formLabel}>Cons ID</label>
-                                        <input className={uiStyles.formInput} type="password" defaultValue="12345678" />
+                                        <input className={uiStyles.formInput} type="password" defaultValue="" placeholder="Tersimpan di server" />
                                     </div>
                                     <div className={uiStyles.formGroup}>
                                         <label className={uiStyles.formLabel}>Secret Key</label>
-                                        <input className={uiStyles.formInput} type="password" defaultValue="abcdefghijklmnopqrstuvwxyz" />
+                                        <input className={uiStyles.formInput} type="password" defaultValue="" placeholder="Tersimpan di server" />
                                     </div>
                                 </div>
                                 <div style={{ background: 'var(--bg)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>

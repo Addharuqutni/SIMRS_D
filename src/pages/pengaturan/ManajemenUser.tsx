@@ -18,7 +18,7 @@ export function ManajemenUser() {
         if (dbUsers.length > 0 && users.length === 0) {
             setUsers(dbUsers);
         }
-    }, [dbUsers]);
+    }, [dbUsers, users.length]);
 
     const currentList = users.length > 0 ? users : dbUsers;
 

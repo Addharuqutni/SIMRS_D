@@ -49,13 +49,12 @@ export function Topbar({ onToggleSidebar, darkMode, onToggleDarkMode }: TopbarPr
     };
 
     const handleLogout = async () => {
-        localStorage.removeItem('simrs_auth');
         await signOut();
         navigate('/login', { replace: true });
     };
 
-    const userName = session?.user?.name || 'Administrator';
-    const userRole = (session?.user as Record<string, any>)?.role || 'Superadmin';
+    const userName = session?.user?.name || 'User';
+    const userRole = ((session?.user as Record<string, unknown>)?.role as string | undefined) || 'user';
     const initials = userName.substring(0, 2).toUpperCase();
 
     return (

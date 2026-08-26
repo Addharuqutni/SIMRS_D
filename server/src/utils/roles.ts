@@ -1,9 +1,4 @@
-export const normalizeRole = (role?: string | null) => (role || '').trim().toLowerCase();
-
-export const hasRole = (userRole: string | undefined | null, allowedRoles: string[]) => {
-    const normalized = normalizeRole(userRole);
-    return allowedRoles.some((role) => normalized === normalizeRole(role));
-};
+const normalizeRole = (role?: string | null) => (role || '').trim().toLowerCase();
 
 export const hasAnyRoleLike = (userRole: string | undefined | null, allowedRoles: string[]) => {
     const normalized = normalizeRole(userRole);

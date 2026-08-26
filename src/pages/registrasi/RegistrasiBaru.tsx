@@ -5,7 +5,8 @@ import { Button, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import { patientApi } from '../../lib/api/patient';
 import { useMasterUsers } from '../../hooks/useMasterData';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { settingsApi } from '../../lib/api/settings';
 import styles from './registrasi.module.css';
 
 export function RegistrasiBaru() {
@@ -14,9 +15,17 @@ export function RegistrasiBaru() {
     const [bpjsVerified, setBpjsVerified] = useState(false);
     const [sepCreated, setSepCreated] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [ticket, setTicket] = useState<{
+        nama: string; rm: string; poli: string; dokter: string; queueCode: string; waktu: Date;
+    } | null>(null);
 
     // Master Users Data for Dropdown
     const { data: allUsers } = useMasterUsers();
+    const { data: publicSettings } = useQuery({
+        queryKey: ['public-settings'],
+        queryFn: settingsApi.getPublicSettings,
+        staleTime: 5 * 60_000,
+    });
     const doctorUsers = (allUsers || []).filter((u: any) =>
         (u.role?.toLowerCase().includes('dokter') || u.role?.toLowerCase() === 'doctor') &&
         u.status === 'aktif'
@@ -66,8 +75,8 @@ export function RegistrasiBaru() {
                 alamat: form.alamat
             });
 
-            // Second, create the visit (registration instance)
-            await patientApi.createVisit({
+            // Second, create the visit (registration instance) — response includes queueCode + loket
+            const visitRes = await patientApi.createVisit({
                 id: `VST-${Date.now()}`,
                 patientId: patientRes.id,
                 poliId: form.poli,
@@ -80,14 +89,25 @@ export function RegistrasiBaru() {
             // Tell Tanstack Query to refetch visits so it shows exactly correctly on list
             queryClient.invalidateQueries({ queryKey: ['visits'] });
 
-            showToast(`Pasien "${form.nama}" berhasil didaftarkan`, 'success');
-            setTimeout(() => navigate('/registrasi'), 500);
+            setTicket({
+                nama: form.nama,
+                rm: generatedRM,
+                poli: form.poli,
+                dokter: doctorUsers.find((d) => d.id === form.dokter)?.nama || form.dokter,
+                queueCode: visitRes?.queueCode || '-',
+                waktu: new Date(),
+            });
+            showToast(`Pasien "${form.nama}" berhasil didaftarkan${visitRes?.queueCode ? ` — antrean ${visitRes.queueCode}` : ''}`, 'success');
         } catch (error: any) {
             console.error(error);
             showToast(error.response?.data?.details ? `Gagal: ${error.response?.data?.details}` : 'Terjadi kesalahan saat menyimpan data', 'danger');
         } finally {
             setSaving(false);
         }
+    };
+
+    const handleCetakTiket = () => {
+        window.print();
     };
 
     return (
@@ -248,6 +268,48 @@ export function RegistrasiBaru() {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Tiket Antrean (shown after successful registration) */}
+            {ticket && (
+                <div className={styles.formSection}>
+                    <h3 className={styles.formSectionTitle}>
+                        <CheckCircle size={18} /> Registrasi Berhasil
+                    </h3>
+                    <div className={styles.sepCard}>
+                        <div className={styles.sepTitle}>✅ Pasien Terdaftar — Tiket Antrean Dibuat</div>
+                        <div className={styles.sepNumber}>No. Antrean: {ticket.queueCode}</div>
+                        <div style={{ marginTop: '4px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                            {ticket.nama} — {ticket.poli} ({ticket.dokter})
+                        </div>
+                        <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                            <Button variant="primary" onClick={handleCetakTiket}>
+                                <Printer size={14} /> Cetak Tiket
+                            </Button>
+                            <Button variant="secondary" onClick={() => navigate('/registrasi')}>
+                                Selesai
+                            </Button>
+                        </div>
+                    </div>
+
+                    {/* Hidden on screen; @media print shows only this ticket (see .print-ticket in index.css) */}
+                    <div className="print-ticket">
+                        <div style={{ textAlign: 'center', fontFamily: 'monospace', color: '#000' }}>
+                            <div style={{ fontSize: '14px', fontWeight: 700 }}>{publicSettings?.namaRS ?? 'SIMRS Tipe D'}</div>
+                            <div style={{ fontSize: '11px' }}>Sistem Informasi Manajemen Rumah Sakit</div>
+                            <div style={{ margin: '10px 0', padding: '8px 0', borderTop: '1px dashed #000', borderBottom: '1px dashed #000' }}>
+                                <div style={{ fontSize: '11px' }}>TIKET ANTREAN</div>
+                                <div style={{ fontSize: '48px', fontWeight: 800, lineHeight: 1.1 }}>{ticket.queueCode}</div>
+                            </div>
+                            <div style={{ fontSize: '12px' }}>Nama: {ticket.nama}</div>
+                            <div style={{ fontSize: '12px' }}>No. RM: {ticket.rm}</div>
+                            <div style={{ fontSize: '12px' }}>Poli: {ticket.poli}</div>
+                            <div style={{ fontSize: '12px' }}>Dokter: {ticket.dokter}</div>
+                            <div style={{ fontSize: '12px' }}>Waktu: {ticket.waktu.toLocaleString('id-ID')}</div>
+                            <div style={{ fontSize: '10px', marginTop: '8px' }}>Mohon menunggu nomor antrean Anda dipanggil petugas</div>
+                        </div>
+                    </div>
                 </div>
             )}
 

@@ -9,6 +9,27 @@ export interface IgdPatient {
     dokter: string;
     status: string;
     visitId: string;
+    // Patient safety fields (MEWS + allergy banner)
+    mewsScore?: number;
+    mews?: { level: 'normal' | 'watch' | 'warn' | 'danger'; action: string };
+    alergi?: string | null;
+    hasAllergy?: boolean;
+    patientId?: string;
+}
+
+export interface IgdAdmisiData {
+    pasien: string;
+    triase: 'merah' | 'kuning' | 'hijau' | 'hitam';
+    diagnosaAwal: string;
+    dokter: string;
+    // Structured vital signs for triage + auto MEWS
+    sistolik?: number;
+    diastolik?: number;
+    nadi?: number;
+    suhu?: number;
+    pernapasan?: number;
+    spo2?: number;
+    kesadaran?: string;
 }
 
 export const igdApi = {
@@ -24,10 +45,15 @@ export const igdApi = {
             // Assume dokter name isn't fully joined yet, just use doctorId if missing
             dokter: d.dokter,
             status: d.status,
-            visitId: d.visitId
+            visitId: d.visitId,
+            mewsScore: d.mewsScore,
+            mews: d.mews,
+            alergi: d.alergi,
+            hasAllergy: d.hasAllergy,
+            patientId: d.patientId,
         }));
     },
-    createAdmisi: async (data: { pasien: string; triase: string; diagnosaAwal: string; dokter: string }) => {
+    createAdmisi: async (data: IgdAdmisiData) => {
         const res = await api.post('/igd/admisi', data);
         return res.data;
     },

@@ -93,7 +93,7 @@ export function LoginPage() {
             <div className={styles.formPanel}>
                 <div className={styles.formWrapper}>
                     <div className={styles.formHeader}>
-                        <h2 className={styles.formTitle}>Selamat Datang 👋</h2>
+                        <h2 className={styles.formTitle}>Selamat Datang</h2>
                         <p className={styles.formSubtitle}>Masuk ke akun SIMRS Anda</p>
                     </div>
 

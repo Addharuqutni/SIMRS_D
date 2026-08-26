@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Pill, CheckCircle, AlertTriangle } from 'lucide-react';
-import { SearchBar, FilterTabs, StatusBadge, Button, Card, Pagination, showToast } from '../../components/ui';
+import { Pill, CheckCircle, AlertTriangle, QrCode } from 'lucide-react';
+import { SearchBar, FilterTabs, StatusBadge, Button, Card, Pagination, QRCode, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import styles from '../registrasi/registrasi.module.css';
 import { usePrescriptions, usePrescriptionDetail, useUpdatePrescriptionStatus } from '../../hooks/usePharmacy';
+import { useSignERecipe } from '../../hooks/useClinical';
 import type { Prescription, PrescriptionItem } from '../../lib/api/pharmacy';
 
 const statusMap: Record<string, { label: string; variant: 'success' | 'warning' | 'danger' | 'info' | 'neutral' }> = {
@@ -20,6 +21,13 @@ export function FarmasiResep() {
 
     const { data: detail } = usePrescriptionDetail(selectedId);
     const updateMutation = useUpdatePrescriptionStatus();
+    const signERecipe = useSignERecipe();
+    const [eRecipe, setERecipe] = useState<{ eRecipeCode: string; qrString: string } | null>(null);
+
+    // Reset e-Recipe panel when selection changes
+    useEffect(() => {
+        setERecipe(null);
+    }, [selectedId]);
 
     // Select the first item automatically if list loads and nothing selected
     useEffect(() => {
@@ -50,6 +58,16 @@ export function FarmasiResep() {
             showToast(`Obat resep ${detail?.noResep} berhasil diserahkan dan mutasi stok dicatat`, 'success');
         } catch {
             showToast('Gagal menyerahkan resep', 'danger');
+        }
+    };
+
+    const handleSignERecipe = async () => {
+        try {
+            const result = await signERecipe.mutateAsync(selectedId);
+            setERecipe({ eRecipeCode: result.eRecipeCode, qrString: result.qrString });
+            showToast(`e-Recipe ${result.eRecipeCode} berhasil ditandatangani`, 'success');
+        } catch {
+            showToast('Gagal menandatangani e-Recipe', 'danger');
         }
     };
 
@@ -156,6 +174,37 @@ export function FarmasiResep() {
                                 })}
                             </tbody>
                         </table>
+
+                        {/* e-Recipe Kemenkes Panel — Sign + QR Code */}
+                        {currentResep && (
+                            <div style={{ marginTop: '20px', padding: '16px', background: 'var(--bg, #f9fafb)', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--border-light)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                    <strong style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <QrCode size={14} /> e-Recipe Kemenkes
+                                    </strong>
+                                    {!eRecipe && (
+                                        <Button variant="secondary" size="sm" onClick={handleSignERecipe} disabled={signERecipe.isPending}>
+                                            {signERecipe.isPending ? 'Menandatangani...' : 'Tanda Tangani & Buat QR'}
+                                        </Button>
+                                    )}
+                                </div>
+                                {eRecipe ? (
+                                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <QRCode value={eRecipe.qrString} size={140} alt={`QR e-Recipe ${eRecipe.eRecipeCode}`} />
+                                        <div style={{ fontSize: '12px' }}>
+                                            <div style={{ marginBottom: '4px' }}><strong>Kode:</strong> {eRecipe.eRecipeCode}</div>
+                                            <div style={{ color: 'var(--text-secondary)', maxWidth: '250px' }}>
+                                                Scan QR ini di apotek/apotekek untuk verifikasi e-Recipe dan dispensing otomatis.
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                        Tanda tangani resep untuk menghasilkan QR e-Recipe yang dapat dipindai apotek.
+                                    </p>
+                                )}
+                            </div>
+                        )}
 
                         <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
                             <div style={{ flex: 1 }}>

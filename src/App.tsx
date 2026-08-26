@@ -34,6 +34,9 @@ const LaporanKeuangan = React.lazy(() => import('./pages/billing/LaporanKeuangan
 const ManajemenUser = React.lazy(() => import('./pages/pengaturan/ManajemenUser').then(m => ({ default: m.ManajemenUser })));
 const MasterData = React.lazy(() => import('./pages/pengaturan/MasterData').then(m => ({ default: m.MasterData })));
 const KonfigurasiSistem = React.lazy(() => import('./pages/pengaturan/KonfigurasiSistem').then(m => ({ default: m.KonfigurasiSistem })));
+const BridgingStatus = React.lazy(() => import('./pages/pengaturan/BridgingStatus').then(m => ({ default: m.BridgingStatus })));
+const AuditTrail = React.lazy(() => import('./pages/pengaturan/AuditTrail').then(m => ({ default: m.AuditTrail })));
+const DisplayBoard = React.lazy(() => import('./pages/display/DisplayBoard').then(m => ({ default: m.DisplayBoard })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { data: session, isPending } = useSession();
@@ -49,11 +52,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** Wrap a page component with the RoleGuard */
-function G({ children }: { children: React.ReactNode }) {
-  return <RoleGuard>{children}</RoleGuard>;
-}
-
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -62,6 +60,9 @@ function App() {
           <Routes>
             {/* Login — public */}
             <Route path="/login" element={<LoginPage />} />
+
+            {/* Papan antrian kiosk — public, no app chrome */}
+            <Route path="/display" element={<DisplayBoard />} />
 
             {/* Protected routes */}
             <Route element={
@@ -77,40 +78,42 @@ function App() {
               <Route path="/notifikasi" element={<NotifikasiPage />} />
 
               {/* Pendaftaran — Superadmin, Pendaftaran */}
-              <Route path="/registrasi" element={<G><RegistrasiList /></G>} />
-              <Route path="/registrasi/baru" element={<G><RegistrasiBaru /></G>} />
-              <Route path="/registrasi/:id" element={<G><RegistrasiBaru /></G>} />
-              <Route path="/sep" element={<G><SepVClaim /></G>} />
-              <Route path="/jadwal-dokter" element={<G><JadwalDokter /></G>} />
-              <Route path="/antrean" element={<G><Antrean /></G>} />
+              <Route path="/registrasi" element={<RoleGuard><RegistrasiList /></RoleGuard>} />
+              <Route path="/registrasi/baru" element={<RoleGuard><RegistrasiBaru /></RoleGuard>} />
+              <Route path="/registrasi/:id" element={<RoleGuard><RegistrasiBaru /></RoleGuard>} />
+              <Route path="/sep" element={<RoleGuard><SepVClaim /></RoleGuard>} />
+              <Route path="/jadwal-dokter" element={<RoleGuard><JadwalDokter /></RoleGuard>} />
+              <Route path="/antrean" element={<RoleGuard><Antrean /></RoleGuard>} />
 
               {/* Pelayanan Medis — Superadmin, Dokter, Perawat */}
-              <Route path="/rawat-jalan" element={<G><RawatJalanList /></G>} />
-              <Route path="/rawat-jalan/:id" element={<G><RawatJalanEMR /></G>} />
-              <Route path="/rawat-inap" element={<G><RawatInapList /></G>} />
-              <Route path="/igd" element={<G><IgdList /></G>} />
-              <Route path="/dokter" element={<G><ListDokter /></G>} />
-              <Route path="/rekam-medis" element={<G><RekamMedis /></G>} />
+              <Route path="/rawat-jalan" element={<RoleGuard><RawatJalanList /></RoleGuard>} />
+              <Route path="/rawat-jalan/:id" element={<RoleGuard><RawatJalanEMR /></RoleGuard>} />
+              <Route path="/rawat-inap" element={<RoleGuard><RawatInapList /></RoleGuard>} />
+              <Route path="/igd" element={<RoleGuard><IgdList /></RoleGuard>} />
+              <Route path="/dokter" element={<RoleGuard><ListDokter /></RoleGuard>} />
+              <Route path="/rekam-medis" element={<RoleGuard><RekamMedis /></RoleGuard>} />
 
               {/* Penunjang — Superadmin, Dokter, Analis Lab, Perawat */}
-              <Route path="/laboratorium" element={<G><Laboratorium /></G>} />
-              <Route path="/radiologi" element={<G><Radiologi /></G>} />
+              <Route path="/laboratorium" element={<RoleGuard><Laboratorium /></RoleGuard>} />
+              <Route path="/radiologi" element={<RoleGuard><Radiologi /></RoleGuard>} />
 
               {/* Farmasi — Superadmin, Apoteker, Dokter (resep only) */}
-              <Route path="/farmasi/resep" element={<G><FarmasiResep /></G>} />
-              <Route path="/farmasi/stok" element={<G><FarmasiStok /></G>} />
-              <Route path="/farmasi/alert" element={<G><AlertExpired /></G>} />
+              <Route path="/farmasi/resep" element={<RoleGuard><FarmasiResep /></RoleGuard>} />
+              <Route path="/farmasi/stok" element={<RoleGuard><FarmasiStok /></RoleGuard>} />
+              <Route path="/farmasi/alert" element={<RoleGuard><AlertExpired /></RoleGuard>} />
 
               {/* Keuangan — Superadmin, Kasir / Billing */}
-              <Route path="/billing" element={<G><BillingList /></G>} />
-              <Route path="/billing/:id" element={<G><BillingDetail /></G>} />
-              <Route path="/klaim-bpjs" element={<G><KlaimBpjs /></G>} />
-              <Route path="/laporan-keuangan" element={<G><LaporanKeuangan /></G>} />
+              <Route path="/billing" element={<RoleGuard><BillingList /></RoleGuard>} />
+              <Route path="/billing/:id" element={<RoleGuard><BillingDetail /></RoleGuard>} />
+              <Route path="/klaim-bpjs" element={<RoleGuard><KlaimBpjs /></RoleGuard>} />
+              <Route path="/laporan-keuangan" element={<RoleGuard><LaporanKeuangan /></RoleGuard>} />
 
               {/* Pengaturan — Superadmin only */}
-              <Route path="/users" element={<G><ManajemenUser /></G>} />
-              <Route path="/master-data" element={<G><MasterData /></G>} />
-              <Route path="/konfigurasi" element={<G><KonfigurasiSistem /></G>} />
+              <Route path="/users" element={<RoleGuard><ManajemenUser /></RoleGuard>} />
+              <Route path="/master-data" element={<RoleGuard><MasterData /></RoleGuard>} />
+              <Route path="/konfigurasi" element={<RoleGuard><KonfigurasiSistem /></RoleGuard>} />
+              <Route path="/bridging-status" element={<RoleGuard><BridgingStatus /></RoleGuard>} />
+              <Route path="/audit-trail" element={<RoleGuard><AuditTrail /></RoleGuard>} />
             </Route>
 
             {/* Catch all — redirect to login */}

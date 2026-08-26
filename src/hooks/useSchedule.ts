@@ -1,56 +1,10 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useList, useMutate } from '../lib/query';
 import { scheduleApi } from '../lib/api/schedule';
 
-export const useSchedules = () => {
-    return useQuery({
-        queryKey: ['schedules-doctors'],
-        queryFn: scheduleApi.getSchedules
-    });
-};
-
-export const useDisplayQueues = () => {
-    return useQuery({
-        queryKey: ['queues-display'],
-        queryFn: scheduleApi.getDisplayQueues
-    });
-};
-
-export const useNextQueue = () => {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: (poliId: string) => scheduleApi.nextQueue(poliId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['queues-display'] });
-        }
-    });
-};
-
-export const useCreateSchedule = () => {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: scheduleApi.createSchedule,
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['schedules-doctors'] });
-        }
-    });
-};
-
-export const useUpdateSchedule = () => {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: ({ id, data }: { id: number, data: any }) => scheduleApi.updateSchedule(id, data),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['schedules-doctors'] });
-        }
-    });
-};
-
-export const useDeleteSchedule = () => {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: scheduleApi.deleteSchedule,
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['schedules-doctors'] });
-        }
-    });
-};
+export const useSchedules = () => useList('schedules-doctors', scheduleApi.getSchedules);
+export const useDisplayQueues = () => useList('queues-display', scheduleApi.getDisplayQueues);
+export const useNextQueue = () => useMutate((poliId: string) => scheduleApi.nextQueue(poliId), 'queues-display');
+export const useCreateSchedule = () => useMutate(scheduleApi.createSchedule, 'schedules-doctors');
+export const useUpdateSchedule = () =>
+    useMutate(({ id, data }: { id: number, data: any }) => scheduleApi.updateSchedule(id, data), 'schedules-doctors');
+export const useDeleteSchedule = () => useMutate(scheduleApi.deleteSchedule, 'schedules-doctors');

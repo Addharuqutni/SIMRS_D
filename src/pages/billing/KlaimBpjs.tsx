@@ -1,3 +1,4 @@
+import { formatRp } from '../../lib/format';
 import { useState } from 'react';
 import { FileText, Send, AlertCircle, Clock, DollarSign, Eye } from 'lucide-react';
 import { Button, SearchBar, FilterTabs, StatusBadge, Pagination, Card, Modal, showToast } from '../../components/ui';
@@ -30,7 +31,6 @@ export function KlaimBpjs() {
         return matchSearch && matchFilter;
     });
 
-    const formatRp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
     const totalPotensi = klaims.filter((k: Klaim) => k.status !== 'dispute').reduce((acc: number, k: Klaim) => acc + k.tarifInaCbg, 0);
 

@@ -36,9 +36,9 @@ export interface Transaction {
 }
 
 export const billingApi = {
-    getBillings: () => api.get<Billing[]>('/api/v1/billing').then((res: AxiosResponse<Billing[]>) => res.data),
-    getBillingDetail: (id: string) => api.get<Billing>(`/api/v1/billing/${id}`).then((res: AxiosResponse<Billing>) => res.data),
-    finalizeBilling: (visitId: string) => api.post<Billing>(`/api/v1/billing/visit/${visitId}/finalize`).then((res: AxiosResponse<Billing>) => res.data),
-    payBilling: (id: string, metodePembayaran: string) => api.put<Billing>(`/api/v1/billing/${id}/pay`, { metodePembayaran }).then((res: AxiosResponse<Billing>) => res.data),
-    getTransactions: () => api.get<Transaction[]>('/api/v1/billing/transactions').then((res: AxiosResponse<Transaction[]>) => res.data),
+    getBillings: () => api.get<Billing[]>('/billing').then((res: AxiosResponse<Billing[]>) => res.data),
+    getBillingDetail: (id: string) => api.get<Billing>(`/billing/${id}`).then((res: AxiosResponse<Billing>) => res.data),
+    finalizeBilling: (visitId: string) => api.post<Billing>(`/billing/visit/${visitId}/finalize`).then((res: AxiosResponse<Billing>) => res.data),
+    payBilling: (id: string, metodePembayaran: string) => api.put<Billing>(`/billing/${id}/pay`, { metodePembayaran }).then((res: AxiosResponse<Billing>) => res.data),
+    getTransactions: () => api.get<Transaction[]>('/billing/transactions').then((res: AxiosResponse<Transaction[]>) => res.data),
 };

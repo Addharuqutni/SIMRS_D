@@ -1,29 +1,14 @@
-import winston from 'winston';
+const isProd = process.env.NODE_ENV === 'production';
 
-const { combine, timestamp, printf, colorize } = winston.format;
+const fmt = (level: string, arg: unknown) => {
+    const time = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    return `[${time}] ${level}: ${typeof arg === 'string' ? arg : JSON.stringify(arg)}`;
+};
 
-const myFormat = printf(({ level, message, timestamp, ...metadata }) => {
-    let msg = `[${timestamp}] ${level}: ${message} `;
-    if (Object.keys(metadata).length > 0) {
-        msg += JSON.stringify(metadata);
-    }
-    return msg;
-});
-
-export const logger = winston.createLogger({
-    level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-    format: combine(
-        colorize(),
-        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-        myFormat
-    ),
-    transports: [
-        new winston.transports.Console()
-    ]
-});
-
-// For an enterprise production scenario, uncomment these transports to keep files
-/*
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' })
-*/
+// ponytail: console logger; switch to a real transport lib if log files/alerting ever needed
+export const logger = {
+    info: (msg: unknown) => console.log(fmt('info', msg)),
+    warn: (msg: unknown) => console.warn(fmt('warn', msg)),
+    error: (msg: unknown) => console.error(fmt('error', msg)),
+    debug: (msg: unknown) => { if (!isProd) console.log(fmt('debug', msg)); },
+};

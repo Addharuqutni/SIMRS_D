@@ -6,6 +6,8 @@
 
 /* ---------- CSS Custom Properties ---------- */
 :root {
+  color-scheme: light;
+
   /* Primary Colors */
   --primary: #0ea5e9;
   --primary-dark: #0284c7;
@@ -106,17 +108,63 @@
 
 /* ---------- Dark Theme ---------- */
 [data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Primary — brighter accents so they read on dark surfaces */
+  --primary-dark: #38bdf8;
+  --primary-light: #7dd3fc;
+  --primary-50: #0b2237;
+  --primary-100: #0d2a44;
+  --primary-200: #155379;
+
+  /* Semantic Colors — brightened text tones, dark surface tints */
+  --success: #34d399;
+  --success-light: #0a2e24;
+  --warning: #fbbf24;
+  --warning-light: #33250e;
+  --danger: #f87171;
+  --danger-light: #3b1a20;
+  --info: #818cf8;
+  --info-light: #232347;
+
+  /* Neutral Palette — inverted ramp so direct gray usages stay legible */
+  --gray-50: #0b1220;
+  --gray-100: #141e33;
+  --gray-200: #1e2a44;
+  --gray-300: #2c3a58;
+  --gray-400: #7488a8;
+  --gray-500: #8b9dbb;
+  --gray-600: #aab8d1;
+  --gray-700: #c5cfdf;
+  --gray-800: #dde4ee;
+  --gray-900: #eef2f8;
+  --gray-950: #f8fafc;
+
+  /* Surfaces & chrome */
   --bg: #0c1222;
   --bg-card: #1e293b;
   --bg-sidebar: #0f172a;
   --bg-topbar: #1e293b;
   --bg-hover: #334155;
-  --bg-active: rgba(14, 165, 233, 0.15);
+  --bg-active: rgba(14, 165, 233, 0.18);
+
+  /* Text — WCAG-ish: body text >= 4.5:1 on --bg-card (#1e293b) */
   --text: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-secondary: #a3b2c9;
+  --text-muted: #7c8aa5;
+  --text-sidebar: #a9b8ce;
+  --text-sidebar-active: #38bdf8;
+
+  /* Borders */
   --border: #334155;
   --border-light: #1e293b;
+
+  /* Shadows — deeper so elevation is still visible on dark */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.4), 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.45), 0 8px 10px rgba(0, 0, 0, 0.3);
 }
 
 /* ---------- Reset & Base ---------- */
@@ -141,6 +189,7 @@ body {
   background-color: var(--bg);
   line-height: 1.6;
   overflow: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 a {
@@ -348,4 +397,66 @@ img {
 
 .stagger>*:nth-child(10) {
   animation-delay: 0.30s;
+}
+
+/* Print: show only the .print-area (see components/ui/Printable) or .print-ticket (see RegistrasiBaru) */
+.print-ticket {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area *,
+  .print-ticket,
+  .print-ticket * {
+    visibility: visible;
+  }
+
+  .print-area,
+  .print-ticket {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+  }
+
+  .print-ticket {
+    display: block;
+    padding: 24px;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Keyboard accessibility: visible focus ring on interactive elements */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Pointer affordance */
+button:not(:disabled),
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Respect reduced motion (entrance/stagger/toast animations) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { FlaskConical, TestTube, CheckCircle, Clock, Plus, Eye, FileText, Trash2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { FlaskConical, TestTube, CheckCircle, Clock, Plus, Eye, FileText, Trash2, Upload, FileDown } from 'lucide-react';
 import { Button, StatusBadge, SearchBar, FilterTabs, Pagination, Modal, Card, showToast, ConfirmDialog } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import styles from '../registrasi/registrasi.module.css';
-import { useLabOrders, useCreateLabOrder, useUpdateLabOrder, useDeleteLabOrder } from '../../hooks/usePenunjang';
+import { useLabOrders, useCreateLabOrder, useUpdateLabOrder, useDeleteLabOrder, useUploadLabHasil } from '../../hooks/usePenunjang';
+import { hasilFileUrl } from '../../lib/api/penunjang';
 import { useDoctors } from '../../hooks/useMasterData';
 import type { LabOrder } from '../../lib/api/penunjang';
 
@@ -20,7 +21,12 @@ export function Laboratorium() {
     const createMutation = useCreateLabOrder();
     const updateMutation = useUpdateLabOrder();
     const deleteMutation = useDeleteLabOrder();
+    const uploadMutation = useUploadLabHasil();
     const { data: doctors = [] } = useDoctors();
+
+    // Hasil PDF upload (single hidden input, target tracked in state)
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [uploadTarget, setUploadTarget] = useState<LabOrder | null>(null);
 
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState('semua');
@@ -119,6 +125,38 @@ export function Laboratorium() {
         setDetailOpen(true);
     };
 
+    const handleUploadClick = (order: LabOrder) => {
+        setUploadTarget(order);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+            fileInputRef.current.click();
+        }
+    };
+
+    const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !uploadTarget) return;
+
+        if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+            showToast('Hanya file PDF yang diizinkan', 'warning');
+            setUploadTarget(null);
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            showToast('Ukuran file maksimal 5MB', 'warning');
+            setUploadTarget(null);
+            return;
+        }
+
+        try {
+            await uploadMutation.mutateAsync({ id: uploadTarget.id, file });
+            showToast(`Hasil PDF "${uploadTarget.id}" berhasil diunggah`, 'success');
+        } catch {
+            showToast('Gagal mengunggah hasil PDF', 'danger');
+        }
+        setUploadTarget(null);
+    };
+
     return (
         <div className={styles.page}>
             <div className={styles.pageHeader}>
@@ -214,6 +252,24 @@ export function Laboratorium() {
                                             <Button variant="ghost" size="sm" style={{ color: 'var(--success)' }} onClick={() => handleViewDetail(order)}>
                                                 <Eye size={14} /> Lihat Hasil
                                             </Button>
+                                        )}
+                                        <Button variant="secondary" size="sm" onClick={() => handleUploadClick(order)} disabled={uploadMutation.isPending}>
+                                            <Upload size={12} /> Upload Hasil
+                                        </Button>
+                                        {order.hasilUrl && (
+                                            <a
+                                                href={hasilFileUrl(order.hasilUrl)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{
+                                                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                    height: '30px', padding: '0 12px', fontSize: '13px', fontWeight: 500,
+                                                    borderRadius: 'var(--radius-md)', textDecoration: 'none',
+                                                    color: 'var(--primary)', background: 'transparent', border: 'none',
+                                                }}
+                                            >
+                                                <FileDown size={14} /> Lihat PDF
+                                            </a>
                                         )}
                                     </div>
                                 </td>
@@ -341,6 +397,9 @@ export function Laboratorium() {
                 onClose={() => setDeleteModal({ open: false, id: '' })}
                 variant="danger"
             />
+
+            {/* Hidden input for hasil PDF upload */}
+            <input ref={fileInputRef} type="file" accept=".pdf" hidden onChange={handleFileSelected} />
         </div>
     );
 }

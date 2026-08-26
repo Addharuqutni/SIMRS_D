@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { AlertCircle, Activity, HeartPulse, Clock, Plus } from 'lucide-react';
+import { AlertCircle, Activity, HeartPulse, Clock, Plus, TriangleAlert } from 'lucide-react';
 import { Button, StatusBadge, Card, SearchBar, Pagination, Modal, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import { useDaftarIgd, useCreateAdmisiIgd, useUpdateStatusTindakan } from '../../hooks/useIgd';
+import type { IgdAdmisiData } from '../../lib/api/igd';
 import type { IgdPatient } from '../../lib/api/igd';
 import { useMasterUsers } from '../../hooks/useMasterData';
 import styles from '../registrasi/registrasi.module.css';
 
-const emptyForm: { pasien: string; triase: 'merah' | 'kuning' | 'hijau' | 'hitam'; diagnosaAwal: string; dokter: string } = { pasien: '', triase: 'kuning', diagnosaAwal: '', dokter: '' };
+const emptyForm: IgdAdmisiData = { pasien: '', triase: 'kuning', diagnosaAwal: '', dokter: '' };
 
 export function IgdList() {
     const { data: dbIgdList = [], isLoading } = useDaftarIgd();
@@ -122,19 +123,55 @@ export function IgdList() {
 
             <div className={styles.tableWrapper}>
                 <table className={uiStyles.table}>
-                    <thead><tr><th>Triase</th><th>Waktu Masuk</th><th>Pasien (RM)</th><th>Keluhan/Diagnosa Awal</th><th>Dokter Jaga</th><th>Status</th><th>Aksi</th></tr></thead>
+                    <thead><tr><th>Triase</th><th>MEWS</th><th>Waktu Masuk</th><th>Pasien (RM)</th><th>Keluhan/Diagnosa Awal</th><th>Dokter Jaga</th><th>Status</th><th>Aksi</th></tr></thead>
                     <tbody>
                         {filtered.length === 0 ? (
-                            <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Tidak ada pasien ditemukan</td></tr>
-                        ) : filtered.map((p, i) => (
+                            <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Tidak ada pasien ditemukan</td></tr>
+                        ) : filtered.map((p, i) => {
+                            const mewsColor = p.mews?.level === 'danger' ? '#dc2626'
+                                : p.mews?.level === 'warn' ? '#f59e0b'
+                                : p.mews?.level === 'watch' ? '#3b82f6'
+                                : '#22c55e';
+                            return (
                             <tr key={i}>
                                 <td>
                                     <StatusBadge variant={p.triase === 'merah' ? 'danger' : p.triase === 'kuning' ? 'warning' : 'success'} dot={false}>
                                         {p.triase.toUpperCase()}
                                     </StatusBadge>
                                 </td>
+                                <td>
+                                    {p.mewsScore != null ? (
+                                        <span style={{
+                                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                            minWidth: '28px', height: '28px', borderRadius: 'var(--radius-full, 999px)',
+                                            background: `${mewsColor}20`, color: mewsColor, fontWeight: 700, fontSize: '13px',
+                                            border: `1px solid ${mewsColor}50`,
+                                        }} title={p.mews?.action}>
+                                            {p.mewsScore}
+                                        </span>
+                                    ) : (
+                                        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
+                                    )}
+                                </td>
                                 <td style={{ fontWeight: 600, color: 'var(--primary)' }}>{p.masuk}</td>
-                                <td><div className={styles.nameCell}><span className={styles.namePrimary}>{p.pasien}</span><span className={styles.nameSecondary}>RM: {p.rm}</span></div></td>
+                                <td>
+                                    <div className={styles.nameCell}>
+                                        <span className={styles.namePrimary}>
+                                            {p.pasien}
+                                            {p.hasAllergy && (
+                                                <span title={`Alergi: ${p.alergi}`} style={{ marginLeft: '6px', color: '#dc2626', display: 'inline-flex', verticalAlign: 'middle' }}>
+                                                    <TriangleAlert size={14} />
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span className={styles.nameSecondary}>RM: {p.rm}</span>
+                                        {p.hasAllergy && (
+                                            <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 500 }}>
+                                                ⚠ {p.alergi}
+                                            </span>
+                                        )}
+                                    </div>
+                                </td>
                                 <td>{p.diagnosaAwal}</td>
                                 <td>{p.dokter}</td>
                                 <td><StatusBadge variant={p.status === 'observasi' ? 'info' : p.status === 'tindakan' ? 'warning' : 'neutral'}>{p.status}</StatusBadge></td>
@@ -145,7 +182,8 @@ export function IgdList() {
                                     </Button>
                                 </td>
                             </tr>
-                        ))}
+                            );
+                        })}
                     </tbody>
                 </table>
                 <Pagination currentPage={1} totalPages={1} totalItems={filtered.length} onPageChange={() => { }} />
@@ -188,8 +226,36 @@ export function IgdList() {
                             onChange={e => setForm(f => ({ ...f, diagnosaAwal: e.target.value }))}
                             placeholder="Deskripsikan keluhan utama pasien..." />
                     </div>
+
+                    {/* Tanda Vital saat Triase — untuk auto-MEWS */}
+                    <div className={uiStyles.formGroup}>
+                        <label className={uiStyles.formLabel}>Tanda Vital Saat Triase (opsional — untuk auto-MEWS)</label>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                            <input className={uiStyles.formInput} type="number" placeholder="Sistolik (mmHg)"
+                                value={form.sistolik || ''}
+                                onChange={e => setForm(f => ({ ...f, sistolik: e.target.value ? Number(e.target.value) : undefined }))} />
+                            <input className={uiStyles.formInput} type="number" placeholder="Diastolik (mmHg)"
+                                value={form.diastolik || ''}
+                                onChange={e => setForm(f => ({ ...f, diastolik: e.target.value ? Number(e.target.value) : undefined }))} />
+                            <input className={uiStyles.formInput} type="number" placeholder="Nadi (x/min)"
+                                value={form.nadi || ''}
+                                onChange={e => setForm(f => ({ ...f, nadi: e.target.value ? Number(e.target.value) : undefined }))} />
+                            <input className={uiStyles.formInput} type="number" step="0.1" placeholder="Suhu (°C)"
+                                value={form.suhu || ''}
+                                onChange={e => setForm(f => ({ ...f, suhu: e.target.value ? Number(e.target.value) : undefined }))} />
+                            <input className={uiStyles.formInput} type="number" placeholder="RR (x/min)"
+                                value={form.pernapasan || ''}
+                                onChange={e => setForm(f => ({ ...f, pernapasan: e.target.value ? Number(e.target.value) : undefined }))} />
+                            <input className={uiStyles.formInput} type="number" placeholder="SpO2 (%)"
+                                value={form.spo2 || ''}
+                                onChange={e => setForm(f => ({ ...f, spo2: e.target.value ? Number(e.target.value) : undefined }))} />
+                        </div>
+                    </div>
+                    <div style={{ background: '#eff6ff', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid #93c5fd', fontSize: '13px', color: '#1e40af' }}>
+                        <strong>Auto-MEWS:</strong> Sistem akan menghitung skor MEWS dari tanda vital di atas. Bila skor ≥ 3 (deteriorasi), notifikasi otomatis dikirim ke dokter jaga.
+                    </div>
                     <div style={{ background: '#fef2f2', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid #fca5a5', fontSize: '13px', color: '#991b1b' }}>
-                        <strong>⚠ Admisi Darurat:</strong> Pasien akan langsung masuk tanpa proses registrasi lengkap. Data dapat dilengkapi kemudian.
+                        <strong>Admisi Darurat:</strong> Pasien akan langsung masuk tanpa proses registrasi lengkap. Data dapat dilengkapi kemudian.
                     </div>
                 </div>
             </Modal>

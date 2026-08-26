@@ -4,4 +4,4 @@ export const authClient = createAuthClient({
     baseURL: import.meta.env.VITE_API_URL || "http://localhost:3000"
 })
 
-export const { signIn, signOut, useSession, getSession } = authClient;
+export const { signIn, signOut, useSession } = authClient;

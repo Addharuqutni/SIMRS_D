@@ -26,8 +26,8 @@ export interface Prescription {
 }
 
 export const pharmacyApi = {
-    getPrescriptions: () => api.get<Prescription[]>('/api/v1/pharmacy/prescriptions').then((res: AxiosResponse<Prescription[]>) => res.data),
-    getPrescriptionDetail: (id: string) => api.get<Prescription>(`/api/v1/pharmacy/prescriptions/${id}`).then((res: AxiosResponse<Prescription>) => res.data),
-    createPrescription: (data: any) => api.post<Prescription>('/api/v1/pharmacy/prescriptions', data).then((res: AxiosResponse<Prescription>) => res.data),
-    updatePrescriptionStatus: (id: string, status: string) => api.put<Prescription>(`/api/v1/pharmacy/prescriptions/${id}/status`, { status }).then((res: AxiosResponse<Prescription>) => res.data),
+    getPrescriptions: () => api.get<Prescription[]>('/pharmacy/prescriptions').then((res: AxiosResponse<Prescription[]>) => res.data),
+    getPrescriptionDetail: (id: string) => api.get<Prescription>(`/pharmacy/prescriptions/${id}`).then((res: AxiosResponse<Prescription>) => res.data),
+    createPrescription: (data: any) => api.post<Prescription>('/pharmacy/prescriptions', data).then((res: AxiosResponse<Prescription>) => res.data),
+    updatePrescriptionStatus: (id: string, status: string) => api.put<Prescription>(`/pharmacy/prescriptions/${id}/status`, { status }).then((res: AxiosResponse<Prescription>) => res.data),
 };

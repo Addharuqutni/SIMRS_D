@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -8,11 +8,6 @@ import styles from './layout.module.css';
 export function AppLayout() {
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
-    const [darkMode, setDarkMode] = useState(false);
-
-    useEffect(() => {
-        document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-    }, [darkMode]);
 
     const toggleSidebar = () => {
         if (window.innerWidth < 768) {
@@ -38,11 +33,7 @@ export function AppLayout() {
                 />
             )}
             <div className={styles.mainArea}>
-                <Topbar
-                    onToggleSidebar={toggleSidebar}
-                    darkMode={darkMode}
-                    onToggleDarkMode={() => setDarkMode(!darkMode)}
-                />
+                <Topbar onToggleSidebar={toggleSidebar} />
                 <main className={styles.content}>
                     <Outlet />
                 </main>

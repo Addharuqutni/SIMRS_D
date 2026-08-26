@@ -1,12 +1,17 @@
+import { formatRp } from '../../lib/format';
 import { useState } from 'react';
 import { Package, AlertTriangle, ArrowDown, ArrowUp, RefreshCcw, Plus, Eye, Edit, Trash2, Clock } from 'lucide-react';
 import { Button, StatusBadge, SearchBar, FilterTabs, Pagination, Card, Modal, ConfirmDialog, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
-import { useMedicines, useCreateMedicine, useUpdateMedicine, useDeleteMedicine } from '../../hooks/useInventory';
+import { useMedicines, useCreateMedicine, useUpdateMedicine, useDeleteMedicine, useCreateReception, useOpname } from '../../hooks/useInventory';
 import type { ObatItem } from '../../lib/api/inventory';
 import styles from '../registrasi/registrasi.module.css';
 
 const emptyItem = { nama: '', kategori: 'Analgesik', bentuk: 'Tablet', min: 100, ed: '', harga: 0, supplier: '' };
+const emptyPenerimaan = { kodeObat: '', noBatch: '', noFaktur: '', supplier: '', qty: 0, expiredDate: '', hargaBeli: 0 };
+
+// Batas "mendekati ED": 90 hari ke depan (real ED dari stock_batches)
+const nearEdDate = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 interface MutasiLog {
     tanggal: string; tipe: 'masuk' | 'keluar'; jumlah: number; keterangan: string;
@@ -17,6 +22,8 @@ export function FarmasiStok() {
     const createMedicine = useCreateMedicine();
     const updateMedicine = useUpdateMedicine();
     const deleteMedicine = useDeleteMedicine();
+    const createReception = useCreateReception();
+    const opname = useOpname();
 
     const currentList = dbObat;
 
@@ -42,7 +49,11 @@ export function FarmasiStok() {
 
     // Penerimaan barang modal
     const [penerimaanOpen, setPenerimaanOpen] = useState(false);
-    const [penerimaanForm, setPenerimaanForm] = useState({ noFaktur: '', supplier: '', items: '' });
+    const [penerimaanForm, setPenerimaanForm] = useState(emptyPenerimaan);
+
+    // Stok opname modal: stok fisik per kode obat (string agar input bisa kosong)
+    const [opnameOpen, setOpnameOpen] = useState(false);
+    const [opnameCounts, setOpnameCounts] = useState<Record<string, string>>({});
 
     // Delete confirm
     const [deleteOpen, setDeleteOpen] = useState(false);
@@ -61,7 +72,6 @@ export function FarmasiStok() {
     });
 
     const kritisCount = currentList.filter((o: ObatItem) => o.stok <= o.min).length;
-    const formatRp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
     // Mutasi handler
     const handleMutasi = () => {
@@ -132,14 +142,53 @@ export function FarmasiStok() {
     };
 
     // Penerimaan barang handler
-    const handlePenerimaan = () => {
-        if (!penerimaanForm.noFaktur || !penerimaanForm.supplier) {
-            showToast('Lengkapi No. Faktur dan Supplier', 'warning');
+    const handlePenerimaan = async () => {
+        const { kodeObat, noBatch, noFaktur, supplier, qty, expiredDate, hargaBeli } = penerimaanForm;
+        if (!kodeObat || !noBatch || !noFaktur || !supplier || !expiredDate || qty <= 0) {
+            showToast('Lengkapi obat, no. batch, no. faktur, supplier, qty, dan tanggal ED', 'warning');
             return;
         }
-        showToast(`Penerimaan barang faktur "${penerimaanForm.noFaktur}" berhasil dicatat`, 'success');
-        setPenerimaanOpen(false);
-        setPenerimaanForm({ noFaktur: '', supplier: '', items: '' });
+        const obat = currentList.find((o: ObatItem) => o.kode === kodeObat);
+        try {
+            await createReception.mutateAsync({
+                kodeObat,
+                noBatch,
+                noFaktur,
+                supplier,
+                qty,
+                expiredDate,
+                hargaBeli: hargaBeli > 0 ? hargaBeli : undefined,
+            });
+            showToast(`Penerimaan ${qty} unit "${obat?.nama || kodeObat}" (faktur ${noFaktur}) berhasil dicatat`, 'success');
+            setPenerimaanOpen(false);
+            setPenerimaanForm(emptyPenerimaan);
+        } catch {
+            showToast('Gagal mencatat penerimaan barang', 'danger');
+        }
+    };
+
+    // Stok opname handler
+    const opnameItems = currentList
+        .filter((o: ObatItem) => opnameCounts[o.kode] !== undefined && opnameCounts[o.kode] !== '')
+        .map((o: ObatItem) => ({ kodeObat: o.kode, stokFisik: Number(opnameCounts[o.kode]) }));
+
+    const handleOpname = async () => {
+        if (!opnameItems.length) {
+            showToast('Isi stok fisik minimal untuk satu item', 'warning');
+            return;
+        }
+        if (opnameItems.some((i) => !Number.isInteger(i.stokFisik) || i.stokFisik < 0)) {
+            showToast('Stok fisik harus berupa angka bulat >= 0', 'warning');
+            return;
+        }
+        try {
+            await opname.mutateAsync({ items: opnameItems });
+            showToast(`Stok opname tersimpan untuk ${opnameItems.length} item`, 'success');
+            setOpnameOpen(false);
+            setOpnameCounts({});
+        } catch {
+            showToast('Gagal menyimpan stok opname', 'danger');
+        }
     };
 
     // Mock kartu stok data
@@ -167,7 +216,8 @@ export function FarmasiStok() {
                 <h1 className={styles.pageTitle}>Stok Obat & Alkes</h1>
                 <div style={{ display: 'flex', gap: '12px' }}>
                     <Button variant="secondary" onClick={() => {
-                        showToast('Stok opname dimulai — silahkan verifikasi stok fisik', 'info');
+                        setOpnameCounts({});
+                        setOpnameOpen(true);
                     }}><RefreshCcw size={16} /> Stok Opname</Button>
                     <Button variant="secondary" onClick={() => setPenerimaanOpen(true)}>
                         <Package size={16} /> Penerimaan Barang
@@ -195,7 +245,7 @@ export function FarmasiStok() {
                 <Card>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{ background: '#fef2f2', color: '#dc2626', padding: '12px', borderRadius: '12px' }}><Clock size={24} /></div>
-                        <div><div style={{ fontSize: '24px', fontWeight: 700 }}>{currentList.filter(o => o.ed < '2026-06-01').length}</div><div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Mendekati ED</div></div>
+                        <div><div style={{ fontSize: '24px', fontWeight: 700 }}>{currentList.filter(o => o.ed && o.ed < nearEdDate).length}</div><div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Mendekati ED</div></div>
                     </div>
                 </Card>
                 <Card>
@@ -244,7 +294,7 @@ export function FarmasiStok() {
                                     {obat.stok <= obat.min && <AlertTriangle size={12} style={{ marginLeft: 4, verticalAlign: 'middle' }} />}
                                 </td>
                                 <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{obat.min.toLocaleString('id-ID')}</td>
-                                <td><span style={{ color: obat.ed < '2026-06-01' ? '#dc2626' : 'inherit' }}>{obat.ed}</span></td>
+                                <td><span style={{ color: obat.ed && obat.ed < nearEdDate ? '#dc2626' : 'inherit' }}>{obat.ed || '-'}</span></td>
                                 <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{formatRp(obat.harga)}</td>
                                 <td>
                                     <div className={styles.actionBtns}>
@@ -424,16 +474,35 @@ export function FarmasiStok() {
 
             {/* Penerimaan Barang Modal */}
             <Modal open={penerimaanOpen} onClose={() => setPenerimaanOpen(false)} title="Penerimaan Barang" icon={<Package size={20} />}
-                footer={<><Button variant="secondary" onClick={() => setPenerimaanOpen(false)}>Batal</Button><Button variant="primary" onClick={handlePenerimaan}>Simpan Penerimaan</Button></>}>
+                footer={<><Button variant="secondary" onClick={() => setPenerimaanOpen(false)}>Batal</Button><Button variant="primary" onClick={handlePenerimaan} disabled={createReception.isPending}>Simpan Penerimaan</Button></>}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div className={uiStyles.formGroup}>
+                        <label className={uiStyles.formLabel}>Obat / Alkes *</label>
+                        <select className={uiStyles.formSelect} value={penerimaanForm.kodeObat}
+                            onChange={e => setPenerimaanForm(f => ({ ...f, kodeObat: e.target.value }))}>
+                            <option value="">Pilih Obat...</option>
+                            {currentList.map((obat: ObatItem) => (
+                                <option key={obat.kode} value={obat.kode}>{obat.nama} ({obat.kode})</option>
+                            ))}
+                        </select>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                         <div className={uiStyles.formGroup}>
                             <label className={uiStyles.formLabel}>No. Faktur / PO *</label>
-                            <input className={uiStyles.formInput} value={penerimaanForm.noFaktur} onChange={e => setPenerimaanForm(f => ({ ...f, noFaktur: e.target.value }))} placeholder="PO-2026-xxxx" />
+                            <input className={uiStyles.formInput} value={penerimaanForm.noFaktur}
+                                onChange={e => setPenerimaanForm(f => ({ ...f, noFaktur: e.target.value }))} placeholder="PO-2026-xxxx" />
                         </div>
                         <div className={uiStyles.formGroup}>
+                            <label className={uiStyles.formLabel}>No. Batch *</label>
+                            <input className={uiStyles.formInput} value={penerimaanForm.noBatch}
+                                onChange={e => setPenerimaanForm(f => ({ ...f, noBatch: e.target.value }))} placeholder="cth: B2601A" />
+                        </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div className={uiStyles.formGroup}>
                             <label className={uiStyles.formLabel}>Supplier *</label>
-                            <select className={uiStyles.formSelect} value={penerimaanForm.supplier} onChange={e => setPenerimaanForm(f => ({ ...f, supplier: e.target.value }))}>
+                            <select className={uiStyles.formSelect} value={penerimaanForm.supplier}
+                                onChange={e => setPenerimaanForm(f => ({ ...f, supplier: e.target.value }))}>
                                 <option value="">Pilih Supplier...</option>
                                 <option>PT Kimia Farma</option>
                                 <option>PT Dexa Medica</option>
@@ -442,12 +511,77 @@ export function FarmasiStok() {
                                 <option>PT Jayamas Medica</option>
                             </select>
                         </div>
+                        <div className={uiStyles.formGroup}>
+                            <label className={uiStyles.formLabel}>Jumlah Diterima *</label>
+                            <input className={uiStyles.formInput} type="number" min="1" value={penerimaanForm.qty || ''}
+                                onChange={e => setPenerimaanForm(f => ({ ...f, qty: +e.target.value }))} placeholder="Qty masuk..." />
+                        </div>
                     </div>
-                    <div className={uiStyles.formGroup}>
-                        <label className={uiStyles.formLabel}>Daftar Item (satu per baris, format: nama obat | jumlah)</label>
-                        <textarea className={uiStyles.formTextarea} rows={5} value={penerimaanForm.items}
-                            onChange={e => setPenerimaanForm(f => ({ ...f, items: e.target.value }))}
-                            placeholder={"Paracetamol 500mg Tab | 500\nAmbroxol 30mg Tab | 200\nCeftriaxone 1g Inj | 50"} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div className={uiStyles.formGroup}>
+                            <label className={uiStyles.formLabel}>Tanggal Expired (ED) *</label>
+                            <input className={uiStyles.formInput} type="date" value={penerimaanForm.expiredDate}
+                                onChange={e => setPenerimaanForm(f => ({ ...f, expiredDate: e.target.value }))} />
+                        </div>
+                        <div className={uiStyles.formGroup}>
+                            <label className={uiStyles.formLabel}>Harga Beli (opsional)</label>
+                            <input className={uiStyles.formInput} type="number" min="0" value={penerimaanForm.hargaBeli || ''}
+                                onChange={e => setPenerimaanForm(f => ({ ...f, hargaBeli: +e.target.value }))} placeholder="Rp / satuan" />
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Stok Opname Modal */}
+            <Modal open={opnameOpen} onClose={() => setOpnameOpen(false)} title="Stok Opname (Penyesuaian Stok)" icon={<RefreshCcw size={20} />} size="lg"
+                footer={<>
+                    <Button variant="secondary" onClick={() => setOpnameOpen(false)}>Batal</Button>
+                    <Button variant="primary" onClick={handleOpname} disabled={opname.isPending}>Simpan Opname</Button>
+                </>}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        Bandingkan stok fisik hasil penghitungan dengan stok sistem. Selisih akan dicatat sebagai mutasi
+                        PENYESUAIAN. Kosongkan baris yang tidak ikut diopname.
+                    </div>
+                    <div style={{ maxHeight: '420px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                        <table className={uiStyles.table}>
+                            <thead>
+                                <tr>
+                                    <th>Kode Item</th><th>Nama Obat/Alkes</th>
+                                    <th style={{ textAlign: 'right' }}>Stok Sistem</th>
+                                    <th style={{ textAlign: 'right' }}>Stok Fisik</th>
+                                    <th style={{ textAlign: 'right' }}>Selisih</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {currentList.map((obat: ObatItem) => {
+                                    const raw = opnameCounts[obat.kode];
+                                    const fisik = raw === undefined || raw === '' ? null : Number(raw);
+                                    const selisih = fisik === null || Number.isNaN(fisik) ? null : fisik - obat.stok;
+                                    return (
+                                        <tr key={obat.kode}>
+                                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{obat.kode}</td>
+                                            <td style={{ fontWeight: 600 }}>{obat.nama}</td>
+                                            <td style={{ textAlign: 'right' }}>{obat.stok.toLocaleString('id-ID')}</td>
+                                            <td style={{ textAlign: 'right' }}>
+                                                <input className={uiStyles.formInput} type="number" min="0" style={{ width: '100px', textAlign: 'right' }}
+                                                    value={raw ?? ''} placeholder="—"
+                                                    onChange={(e) => setOpnameCounts((prev) => ({ ...prev, [obat.kode]: e.target.value }))} />
+                                            </td>
+                                            <td style={{
+                                                textAlign: 'right', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                                                color: selisih === null || selisih === 0 ? 'var(--text-muted)' : selisih > 0 ? 'var(--success)' : '#dc2626',
+                                            }}>
+                                                {selisih === null ? '-' : selisih > 0 ? `+${selisih}` : selisih}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {opnameItems.length} dari {currentList.length} item terisi
                     </div>
                 </div>
             </Modal>

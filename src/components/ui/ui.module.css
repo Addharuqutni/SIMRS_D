@@ -753,3 +753,23 @@
         transform: translateX(50px);
     }
 }
+
+/* ---------- Dark mode fixes ----------
+   Hardcoded badge/button text colors that would sink into dark surface tints. */
+:global([data-theme='dark']) .badge.success {
+    color: #34d399;
+}
+
+:global([data-theme='dark']) .badge.warning {
+    color: #fbbf24;
+}
+
+:global([data-theme='dark']) .badge.danger {
+    color: #f87171;
+}
+
+/* Bright sky fills need dark text (not #fff) to stay readable in dark mode */
+:global([data-theme='dark']) .btnPrimary,
+:global([data-theme='dark']) .pageBtn.active {
+    color: #06253c;
+}

@@ -1,5 +1,4 @@
-import React, { useRef } from 'react';
-import { useReactToPrint } from 'react-to-print';
+import React from 'react';
 import { Printer } from 'lucide-react';
 import { Button } from './index';
 
@@ -10,27 +9,20 @@ interface PrintableProps {
     variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
 }
 
-// A reusable wrapper component that provides a "Print" button
-// and handles printing its children elegantly.
+// Print happens via the browser dialog; @media print rules in index.css
+// isolate .print-area and hide .no-print (the button bar, app chrome).
 export const Printable: React.FC<PrintableProps> = ({
     children,
     title = 'Cetak Dokumen',
     buttonText = 'Cetak',
     variant = 'secondary'
 }) => {
-    const componentRef = useRef<HTMLDivElement>(null);
-
-    const handlePrint = useReactToPrint({
-        contentRef: componentRef,
-        documentTitle: title,
-        pageStyle: `
-            @page { size: auto; margin: 20mm; }
-            @media print {
-                body { -webkit-print-color-adjust: exact; background: transparent; }
-                .no-print { display: none !important; }
-            }
-        `,
-    });
+    const handlePrint = () => {
+        const prevTitle = document.title;
+        document.title = title;
+        window.print();
+        document.title = prevTitle;
+    };
 
     return (
         <div>
@@ -41,7 +33,7 @@ export const Printable: React.FC<PrintableProps> = ({
             </div>
 
             {/* The actual printable area */}
-            <div ref={componentRef} style={{ background: '#fff', padding: '24px', borderRadius: '8px', color: '#000' }}>
+            <div className="print-area" style={{ background: '#fff', padding: '24px', borderRadius: '8px', color: '#000' }}>
                 {children}
             </div>
         </div>

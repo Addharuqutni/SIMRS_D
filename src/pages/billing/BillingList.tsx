@@ -1,3 +1,4 @@
+import { formatRp } from '../../lib/format';
 import { useState } from 'react';
 import { Wallet, Eye, Printer, CheckCircle, CreditCard, DollarSign } from 'lucide-react';
 import { Button, StatusBadge, SearchBar, FilterTabs, Pagination, Card, Modal, showToast } from '../../components/ui';
@@ -35,7 +36,6 @@ export function BillingList() {
         return matchSearch && matchFilter;
     });
 
-    const formatRp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
     const totalOpen = billings.filter((b: Billing) => b.status === 'open' || b.status === 'finalized').reduce((a: number, b2: Billing) => a + b2.total, 0);
     const totalPaid = billings.filter((b: Billing) => b.status === 'paid').reduce((a: number, b2: Billing) => a + b2.total, 0);
 

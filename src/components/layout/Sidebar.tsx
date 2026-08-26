@@ -10,6 +10,7 @@ import {
     BedDouble,
     Ambulance,
     FolderHeart,
+    HeartPulse,
     FlaskConical,
     ScanLine,
     Pill,
@@ -21,6 +22,7 @@ import {
     Users,
     Database,
     Settings,
+    Shield,
     ChevronsLeft,
     ChevronsRight,
 } from 'lucide-react';
@@ -100,6 +102,8 @@ const navGroups: NavGroup[] = [
         items: [
             { label: 'Manajemen User', path: '/users', icon: <Users size={20} /> },
             { label: 'Master Data', path: '/master-data', icon: <Database size={20} /> },
+            { label: 'Bridging BPJS', path: '/bridging-status', icon: <HeartPulse size={20} /> },
+            { label: 'Audit Trail', path: '/audit-trail', icon: <Shield size={20} /> },
             { label: 'Konfigurasi', path: '/konfigurasi', icon: <Settings size={20} /> },
         ],
     },

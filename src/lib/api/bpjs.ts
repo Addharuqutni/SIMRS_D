@@ -25,10 +25,10 @@ export interface Klaim {
 }
 
 export const bpjsApi = {
-    getSeps: () => api.get<SepRecord[]>('/api/v1/vclaim/sep').then((res: AxiosResponse<SepRecord[]>) => res.data),
-    createSep: (data: Partial<SepRecord>) => api.post<SepRecord>('/api/v1/vclaim/sep', data).then((res: AxiosResponse<SepRecord>) => res.data),
-    batalkanSep: (noSep: string) => api.put<SepRecord>(`/api/v1/vclaim/sep/${noSep}/batal`).then((res: AxiosResponse<SepRecord>) => res.data),
+    getSeps: () => api.get<SepRecord[]>('/vclaim/sep').then((res: AxiosResponse<SepRecord[]>) => res.data),
+    createSep: (data: Partial<SepRecord>) => api.post<SepRecord>('/vclaim/sep', data).then((res: AxiosResponse<SepRecord>) => res.data),
+    batalkanSep: (noSep: string) => api.put<SepRecord>(`/vclaim/sep/${noSep}/batal`).then((res: AxiosResponse<SepRecord>) => res.data),
 
-    getKlaims: () => api.get<Klaim[]>('/api/v1/vclaim/klaim').then((res: AxiosResponse<Klaim[]>) => res.data),
-    updateKlaimStatus: (noSep: string, status: string) => api.put<Klaim>(`/api/v1/vclaim/klaim/${noSep}/status`, { status }).then((res: AxiosResponse<Klaim>) => res.data),
+    getKlaims: () => api.get<Klaim[]>('/vclaim/klaim').then((res: AxiosResponse<Klaim[]>) => res.data),
+    updateKlaimStatus: (noSep: string, status: string) => api.put<Klaim>(`/vclaim/klaim/${noSep}/status`, { status }).then((res: AxiosResponse<Klaim>) => res.data),
 };

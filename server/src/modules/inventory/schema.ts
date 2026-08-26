@@ -33,3 +33,25 @@ export const deleteMedicineSchema = z.object({
         kode: z.string().min(1, 'Kode obat param is required')
     })
 });
+
+export const createReceptionSchema = z.object({
+    body: z.object({
+        kodeObat: z.string().min(1, 'Kode obat wajib dipilih').max(50),
+        noBatch: z.string().min(1, 'No. batch wajib diisi').max(100),
+        noFaktur: z.string().min(1, 'No. faktur wajib diisi').max(100),
+        supplier: z.string().min(1, 'Supplier wajib diisi').max(200),
+        qty: z.number().int('Qty harus berupa angka bulat').positive('Qty harus lebih dari 0'),
+        expiredDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expired date harus berformat YYYY-MM-DD'),
+        hargaBeli: z.number().nonnegative('Harga beli tidak boleh negatif').optional(),
+    })
+});
+
+export const createOpnameSchema = z.object({
+    body: z.object({
+        items: z.array(z.object({
+            kodeObat: z.string().min(1, 'Kode obat wajib dipilih').max(50),
+            stokFisik: z.number().int('Stok fisik harus berupa angka bulat').nonnegative('Stok fisik tidak boleh negatif'),
+            catatan: z.string().max(500, 'Catatan maksimal 500 karakter').optional(),
+        })).min(1, 'Minimal satu item opname'),
+    })
+});

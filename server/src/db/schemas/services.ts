@@ -9,6 +9,10 @@ export const prescriptions = pgTable('prescriptions', {
     status: varchar('status', { length: 50 }).notNull().default('baru'), // baru, proses, selesai
     waktuResep: timestamp('waktu_resep').defaultNow().notNull(),
     waktuSelesai: timestamp('waktu_selesai'),
+    // e-Recipe Kemenkes fields
+    eRecipeCode: varchar('e_recipe_code', { length: 100 }), // Kode unik e-Recipe (scan QR)
+    eRecipeQrPayload: text('e_recipe_qr_payload'), // JSON payload yang di-encode ke QR
+    eRecipeSignedAt: timestamp('e_recipe_signed_at'),
 });
 
 export const prescriptionItems = pgTable('prescription_items', {

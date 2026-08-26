@@ -48,7 +48,8 @@ export const labApi = {
     deleteOrder: async (id: string) => {
         const res = await api.delete(`/laboratory/${id}`);
         return res.data;
-    }
+    },
+    uploadHasil: (id: string, file: File) => uploadHasil('lab', id, file)
 };
 
 export const radApi = {
@@ -67,5 +68,26 @@ export const radApi = {
     deleteOrder: async (id: string) => {
         const res = await api.delete(`/radiology/${id}`);
         return res.data;
-    }
+    },
+    uploadHasil: (id: string, file: File) => uploadHasil('rad', id, file)
+};
+
+// Upload hasil pemeriksaan as PDF (multipart) — Content-Type override lets
+// the browser set the multipart boundary (axios default is JSON).
+export const uploadHasil = async (kind: 'lab' | 'rad', id: string, file: File) => {
+    const base = kind === 'lab' ? '/laboratory' : '/radiology';
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await api.post(`${base}/${id}/hasil`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+};
+
+// Uploaded hasil paths are relative to the server origin (e.g. /uploads/x.pdf)
+export const hasilFileUrl = (path?: string) => {
+    if (!path) return undefined;
+    const origin = (api.defaults.baseURL || '').replace(/\/api\/v1\/?$/, '');
+    return `${origin}${path}`;
 };

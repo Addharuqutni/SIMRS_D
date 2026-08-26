@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, Shield, Activity, Edit2, Trash2, Key } from 'lucide-react';
+import { UserPlus, Shield, Activity, Edit2, Trash2, Key, RefreshCw, ScrollText, Download } from 'lucide-react';
 import { Button, StatusBadge, SearchBar, FilterTabs, Pagination, Modal, ConfirmDialog, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
-import { useMasterUsers } from '../../hooks/useMasterData';
-import { masterApi, type User } from '../../lib/api/master';
+import { useMasterUsers, useAuditLogs, useResetPassword, usePurgeAuditLogs } from '../../hooks/useMasterData';
+import { masterApi, type User, type AuditLog } from '../../lib/api/master';
 import styles from '../registrasi/registrasi.module.css';
 
 const emptyForm: Omit<User, 'id' | 'lastLogin'> = { nama: '', email: '', username: '', role: 'Perawat', unit: '', status: 'aktif' };
@@ -33,7 +33,58 @@ export function ManajemenUser() {
 
     // Confirm dialog state
     const [confirmOpen, setConfirmOpen] = useState(false);
-    const [confirmTarget, setConfirmTarget] = useState<{ user: User; action: 'delete' | 'reset' } | null>(null);
+    const [confirmTarget, setConfirmTarget] = useState<User | null>(null);
+
+    // Reset password modal state
+    const [resetOpen, setResetOpen] = useState(false);
+    const [resetTarget, setResetTarget] = useState<User | null>(null);
+    const [newPassword, setNewPassword] = useState('');
+    const resetMutation = useResetPassword();
+
+    // Audit log state (debounced search feeds the query key)
+    const [auditSearch, setAuditSearch] = useState('');
+    const [auditQuery, setAuditQuery] = useState('');
+    useEffect(() => {
+        const t = setTimeout(() => setAuditQuery(auditSearch.trim()), 300);
+        return () => clearTimeout(t);
+    }, [auditSearch]);
+    const { data: auditLogs = [], isLoading: auditLoading, refetch: refetchAudit } = useAuditLogs(auditQuery);
+
+    // Audit retention: CSV export (blob download) + purge of rows older than 90 days
+    const [purgeOpen, setPurgeOpen] = useState(false);
+    const purgeMutation = usePurgeAuditLogs();
+
+    const exportAuditCsv = async () => {
+        try {
+            const blob = await masterApi.exportAuditLogs();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `audit_export_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast('Log audit berhasil diekspor', 'success');
+        } catch {
+            showToast('Gagal mengekspor log audit', 'danger');
+        }
+    };
+
+    const handlePurgeAudit = () => {
+        purgeMutation.mutate({ days: 90 }, {
+            onSuccess: (data) => {
+                showToast(`${data.deleted} log audit lebih tua dari 90 hari berhasil dibersihkan`, 'success');
+                setPurgeOpen(false);
+            },
+            onError: () => {
+                showToast('Gagal membersihkan log audit', 'danger');
+            },
+        });
+    };
+
+    const methodVariant = (method?: string | null): 'success' | 'info' | 'danger' | 'neutral' =>
+        method === 'POST' ? 'success' : method === 'PUT' ? 'info' : method === 'DELETE' ? 'danger' : 'neutral';
 
     // ---- Filtering ----
     const filtered = currentList.filter((u: User) => {
@@ -108,26 +159,41 @@ export function ManajemenUser() {
         if (!confirmTarget) return;
         setIsSaving(true);
         try {
-            if (confirmTarget.action === 'delete') {
-                const toggled = confirmTarget.user.status === 'aktif' ? 'nonaktif' : 'aktif';
-                // Toggle status in database instead of hard deleting for audit trail (or actual delete call)
-                // Using update instead to toggle 'status'
-                await masterApi.updateUser(confirmTarget.user.id, { status: toggled });
-                showToast(`User "${confirmTarget.user.nama}" di-${toggled === 'aktif' ? 'aktifkan' : 'nonaktifkan'}`, toggled === 'aktif' ? 'success' : 'warning');
-            } else {
-                // Future Implementation: Password reset API connection
-                showToast(`Password user "${confirmTarget.user.nama}" berhasil direset`, 'info');
-            }
+            const toggled = confirmTarget.status === 'aktif' ? 'nonaktif' : 'aktif';
+            // Toggle status in database instead of hard deleting for audit trail (or actual delete call)
+            // Using update instead to toggle 'status'
+            await masterApi.updateUser(confirmTarget.id, { status: toggled });
+            showToast(`User "${confirmTarget.nama}" di-${toggled === 'aktif' ? 'aktifkan' : 'nonaktifkan'}`, toggled === 'aktif' ? 'success' : 'warning');
             await refetch();
             setUsers([]); // re-sync local state with DB
         } catch (error: any) {
             console.error(error);
             const detail = error.response?.data?.details;
-            showToast(detail ? `Gagal: ${detail}` : `Gagal mengubah status user`, 'danger');
+            showToast(detail ? `Gagal: ${detail}` : 'Gagal mengubah status user', 'danger');
         } finally {
             setIsSaving(false);
             setConfirmOpen(false);
         }
+    };
+
+    const handleResetPassword = () => {
+        if (!resetTarget) return;
+        if (newPassword.length < 8) {
+            showToast('Password minimal 8 karakter', 'warning');
+            return;
+        }
+        resetMutation.mutate({ id: resetTarget.id, password: newPassword }, {
+            onSuccess: () => {
+                showToast(`Password user "${resetTarget.nama}" berhasil direset`, 'success');
+                setResetOpen(false);
+                setNewPassword('');
+            },
+            onError: (error: any) => {
+                console.error(error);
+                const detail = error.response?.data?.details?.[0]?.message || error.response?.data?.error;
+                showToast(detail ? `Gagal: ${detail}` : 'Gagal mereset password', 'danger');
+            },
+        });
     };
 
     if (isLoading) {
@@ -216,7 +282,7 @@ export function ManajemenUser() {
                                 <td>
                                     <div className={styles.actionBtns}>
                                         <Button variant="ghost" size="sm" title="Reset Password"
-                                            onClick={() => { setConfirmTarget({ user, action: 'reset' }); setConfirmOpen(true); }}>
+                                            onClick={() => { setResetTarget(user); setNewPassword(''); setResetOpen(true); }}>
                                             <Key size={14} />
                                         </Button>
                                         <Button variant="ghost" size="sm" title="Edit" onClick={() => openEditModal(user)}>
@@ -224,7 +290,7 @@ export function ManajemenUser() {
                                         </Button>
                                         <Button variant="ghost" size="sm" title={user.status === 'aktif' ? 'Non-aktifkan' : 'Aktifkan'}
                                             style={{ color: user.status === 'aktif' ? 'var(--danger)' : 'var(--success)' }}
-                                            onClick={() => { setConfirmTarget({ user, action: 'delete' }); setConfirmOpen(true); }}>
+                                            onClick={() => { setConfirmTarget(user); setConfirmOpen(true); }}>
                                             <Trash2 size={14} />
                                         </Button>
                                     </div>
@@ -234,6 +300,71 @@ export function ManajemenUser() {
                     </tbody>
                 </table>
                 <Pagination currentPage={1} totalPages={Math.ceil(filtered.length / 10) || 1} totalItems={filtered.length} onPageChange={() => { }} />
+            </div>
+
+            {/* Log Audit */}
+            <div className={styles.tableWrapper} style={{ marginTop: '24px' }}>
+                <div className={styles.toolbar}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <ScrollText size={18} style={{ color: 'var(--primary)' }} />
+                        <span style={{ fontWeight: 600, fontSize: '15px' }}>Log Audit</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <SearchBar placeholder="Cari path atau user..." value={auditSearch} onChange={setAuditSearch} />
+                        <Button variant="secondary" onClick={exportAuditCsv}>
+                            <Download size={16} /> Ekspor CSV
+                        </Button>
+                        <Button variant="danger" onClick={() => setPurgeOpen(true)}>
+                            <Trash2 size={16} /> Bersihkan &gt;90 hari
+                        </Button>
+                        <Button variant="secondary" onClick={() => refetchAudit()}>
+                            <RefreshCw size={16} /> Refresh
+                        </Button>
+                    </div>
+                </div>
+                <table className={uiStyles.table}>
+                    <thead>
+                        <tr>
+                            <th>Waktu</th>
+                            <th>User</th>
+                            <th>Method</th>
+                            <th>Path</th>
+                            <th>Kutipan Body</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {auditLoading ? (
+                            <tr>
+                                <td colSpan={5} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                                    Memuat log audit...
+                                </td>
+                            </tr>
+                        ) : auditLogs.length === 0 ? (
+                            <tr>
+                                <td colSpan={5} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                                    Tidak ada log audit
+                                </td>
+                            </tr>
+                        ) : auditLogs.map((log: AuditLog) => (
+                            <tr key={log.id}>
+                                <td style={{ whiteSpace: 'nowrap', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                    {new Date(log.createdAt).toLocaleString('id-ID')}
+                                </td>
+                                <td>
+                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                        <span style={{ fontWeight: 500 }}>{log.userName || '-'}</span>
+                                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{log.ip || '-'}</span>
+                                    </div>
+                                </td>
+                                <td><StatusBadge variant={methodVariant(log.method)}>{log.method || '-'}</StatusBadge></td>
+                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{log.path || '-'}</td>
+                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', maxWidth: '360px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {log.body ? log.body.slice(0, 120) : '-'}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
 
             {/* Add/Edit Modal */}
@@ -327,17 +458,53 @@ export function ManajemenUser() {
                 </div>
             </Modal>
 
+            {/* Reset Password Modal */}
+            <Modal
+                open={resetOpen}
+                onClose={() => setResetOpen(false)}
+                title={`Reset Password: ${resetTarget?.nama ?? ''}`}
+                icon={<Key size={20} />}
+                size="sm"
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={() => setResetOpen(false)} disabled={resetMutation.isPending}>Batal</Button>
+                        <Button variant="primary" onClick={handleResetPassword} disabled={resetMutation.isPending}>
+                            {resetMutation.isPending ? 'Menyimpan...' : 'Reset Password'}
+                        </Button>
+                    </>
+                }
+            >
+                <div className={uiStyles.formGroup}>
+                    <label className={uiStyles.formLabel}>Password Baru *</label>
+                    <input className={uiStyles.formInput} type="password" value={newPassword} autoComplete="new-password"
+                        onChange={e => setNewPassword(e.target.value)}
+                        placeholder="Minimal 8 karakter" />
+                    {newPassword.length > 0 && newPassword.length < 8 && (
+                        <span style={{ fontSize: '12px', color: 'var(--danger)' }}>Password minimal 8 karakter</span>
+                    )}
+                </div>
+            </Modal>
+
             {/* Confirm Dialog */}
             <ConfirmDialog
                 open={confirmOpen}
-                title={confirmTarget?.action === 'delete' ? (confirmTarget?.user?.status === 'aktif' ? 'Nonaktifkan User?' : 'Aktifkan User?') : 'Reset Password?'}
-                message={confirmTarget?.action === 'delete'
-                    ? `Apakah Anda yakin ingin me-${confirmTarget?.user?.status === 'aktif' ? 'nonaktifkan' : 'aktifkan'} user ${confirmTarget?.user?.nama}?`
-                    : `Apakah Anda yakin ingin mereset password untuk user ${confirmTarget?.user?.nama}?`}
-                confirmLabel={confirmTarget?.action === 'delete' ? 'Ya, Ubah Status' : 'Ya, Reset'}
+                title={confirmTarget?.status === 'aktif' ? 'Nonaktifkan User?' : 'Aktifkan User?'}
+                message={`Apakah Anda yakin ingin me-${confirmTarget?.status === 'aktif' ? 'nonaktifkan' : 'aktifkan'} user ${confirmTarget?.nama}?`}
+                confirmLabel="Ya, Ubah Status"
                 onConfirm={handleConfirmAction}
                 onClose={() => setConfirmOpen(false)}
-                variant={confirmTarget?.action === 'delete' && confirmTarget?.user?.status === 'aktif' ? 'danger' : 'success'}
+                variant={confirmTarget?.status === 'aktif' ? 'danger' : 'success'}
+            />
+
+            {/* Purge Audit Confirm Dialog */}
+            <ConfirmDialog
+                open={purgeOpen}
+                title="Bersihkan Log Audit?"
+                message="Semua log audit yang lebih tua dari 90 hari akan dihapus permanen. Disarankan mengekspor CSV terlebih dahulu. Lanjutkan?"
+                confirmLabel="Ya, Bersihkan"
+                onConfirm={handlePurgeAudit}
+                onClose={() => setPurgeOpen(false)}
+                variant="danger"
             />
         </div >
     );

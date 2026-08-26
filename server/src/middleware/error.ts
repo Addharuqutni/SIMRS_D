@@ -2,15 +2,6 @@ import { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { logger } from '../utils/logger';
 
-export class AppError extends Error {
-    statusCode: number;
-
-    constructor(statusCode: number, message: string) {
-        super(message);
-        this.statusCode = statusCode;
-    }
-}
-
 export const notFoundHandler = (req: Request, res: Response) => {
     res.status(404).json({ error: 'Not Found' });
 };
@@ -23,8 +14,13 @@ export const errorHandler = (err: unknown, req: Request, res: Response, _next: N
         });
     }
 
-    if (err instanceof AppError) {
-        return res.status(err.statusCode).json({ error: err.message });
+    // body-parser errors: oversized body, malformed JSON
+    const bodyErr = err as { type?: string; statusCode?: number };
+    if (bodyErr?.type === 'entity.too.large' || bodyErr?.statusCode === 413) {
+        return res.status(413).json({ error: 'Body request terlalu besar (maksimum 1MB).' });
+    }
+    if (bodyErr?.type === 'entity.parse.failed') {
+        return res.status(400).json({ error: 'Body JSON tidak valid.' });
     }
 
     logger.error({

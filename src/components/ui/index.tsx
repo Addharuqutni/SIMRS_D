@@ -1,7 +1,9 @@
 import { useState, useEffect, type ReactNode } from 'react';
+import { TriangleAlert, CircleHelp, CircleCheck, Check, X, Info } from 'lucide-react';
 import styles from './ui.module.css';
 
 export { Printable } from './Printable';
+export { QRCode } from './QRCode';
 
 /* ========== StatCard ========== */
 interface StatCardProps {
@@ -238,7 +240,7 @@ export function Modal({ open, onClose, title, icon, size = 'md', children, foote
                         {icon}
                         {title}
                     </div>
-                    <button className={styles.modalClose} onClick={onClose}>✕</button>
+                    <button className={styles.modalClose} onClick={onClose} aria-label="Tutup"><X size={16} /></button>
                 </div>
                 <div className={styles.modalBody}>{children}</div>
                 {footer && <div className={styles.modalFooter}>{footer}</div>}
@@ -267,14 +269,15 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message, varian
         success: styles.confirmIconSuccess,
     }[variant];
 
-    const iconMap = { danger: '⚠', warning: '❓', success: '✓' };
+    const iconMap = { danger: TriangleAlert, warning: CircleHelp, success: CircleCheck };
+    const ConfirmIcon = iconMap[variant];
 
     return (
         <div className={styles.modalOverlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
             <div className={`${styles.modalDialog} ${styles.modalSm}`}>
                 <div className={styles.modalBody} style={{ paddingTop: '32px', paddingBottom: '8px' }}>
                     <div className={`${styles.confirmIcon} ${iconVariantClass}`}>
-                        <span style={{ fontSize: '24px' }}>{iconMap[variant]}</span>
+                        <ConfirmIcon size={26} />
                     </div>
                     <div className={styles.confirmTitle}>{title}</div>
                     <div className={styles.confirmMessage}>{message}</div>
@@ -328,19 +331,22 @@ export function ToastContainer() {
         info: styles.toastInfo,
     };
 
-    const iconMap = { success: '✓', danger: '✕', warning: '⚠', info: 'ℹ' };
+    const iconMap = { success: Check, danger: X, warning: TriangleAlert, info: Info };
     const colorMap = { success: 'var(--success)', danger: 'var(--danger)', warning: 'var(--warning)', info: 'var(--primary)' };
 
     return (
         <div className={styles.toastContainer}>
-            {toasts.map(t => (
-                <div key={t.id} className={`${styles.toast} ${variantClass[t.variant]}`}>
-                    <span className={styles.toastIcon} style={{ color: colorMap[t.variant], fontSize: '18px', fontWeight: 700 }}>
-                        {iconMap[t.variant]}
-                    </span>
-                    {t.message}
-                </div>
-            ))}
+            {toasts.map(t => {
+                const ToastIcon = iconMap[t.variant];
+                return (
+                    <div key={t.id} className={`${styles.toast} ${variantClass[t.variant]}`}>
+                        <span className={styles.toastIcon} style={{ color: colorMap[t.variant] }}>
+                            <ToastIcon size={18} strokeWidth={2.5} />
+                        </span>
+                        {t.message}
+                    </div>
+                );
+            })}
         </div>
     );
 }

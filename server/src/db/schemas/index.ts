@@ -6,3 +6,4 @@ export * from './billing';
 export * from './schedule';
 export * from './inventory';
 export * from './notify';
+export * from './audit';

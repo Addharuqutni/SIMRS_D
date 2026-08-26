@@ -1,13 +1,22 @@
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Search, Bell, Sun, Moon, ChevronRight, LogOut } from 'lucide-react';
 import { useSession, signOut } from '../../lib/auth-client';
+import { useUnreadCount } from '../../hooks/useNotification';
 import styles from './layout.module.css';
 
 interface TopbarProps {
     onToggleSidebar: () => void;
-    darkMode: boolean;
-    onToggleDarkMode: () => void;
+    /**
+     * Legacy (optional): when `darkMode` is provided the parent stays in control
+     * of the theme state. Otherwise the toggle below manages the theme itself
+     * via `document.documentElement.dataset.theme` + localStorage key 'theme'.
+     */
+    darkMode?: boolean;
+    onToggleDarkMode?: () => void;
 }
+
+const THEME_STORAGE_KEY = 'theme';
 
 const routeLabels: Record<string, string> = {
     '/dashboard': 'Dashboard',
@@ -33,10 +42,54 @@ const routeLabels: Record<string, string> = {
     '/konfigurasi': 'Konfigurasi',
 };
 
+function readStoredTheme(): boolean {
+    try {
+        return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
+    } catch {
+        return false;
+    }
+}
+
+function applyTheme(dark: boolean) {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, dark ? 'dark' : 'light');
+    } catch {
+        // Storage unavailable (e.g. private mode) — theme still applies for this session
+    }
+}
+
 export function Topbar({ onToggleSidebar, darkMode, onToggleDarkMode }: TopbarProps) {
     const location = useLocation();
     const navigate = useNavigate();
     const { data: session } = useSession();
+    const { data: unreadCount = 0 } = useUnreadCount();
+
+    const [internalDark, setInternalDark] = useState(readStoredTheme);
+    const isDark = darkMode ?? internalDark;
+
+    // On mount (self-managed mode): apply the persisted theme and keep tabs in sync.
+    useEffect(() => {
+        if (darkMode !== undefined) return; // parent controls the theme
+
+        applyTheme(readStoredTheme());
+
+        const onStorage = (e: StorageEvent) => {
+            if (e.key !== THEME_STORAGE_KEY) return;
+            const dark = e.newValue === 'dark';
+            document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+            setInternalDark(dark);
+        };
+        window.addEventListener('storage', onStorage);
+        return () => window.removeEventListener('storage', onStorage);
+    }, [darkMode]);
+
+    const handleToggleTheme = () => {
+        const next = !isDark;
+        if (onToggleDarkMode) onToggleDarkMode(); // legacy: let the parent flip its state
+        applyTheme(next);
+        setInternalDark(next);
+    };
 
     const getPageTitle = () => {
         const path = location.pathname;
@@ -80,13 +133,22 @@ export function Topbar({ onToggleSidebar, darkMode, onToggleDarkMode }: TopbarPr
             </div>
 
             <div className={styles.topbarRight}>
-                <button className={styles.themeToggle} onClick={onToggleDarkMode} title="Toggle theme">
-                    {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                <button
+                    className={styles.themeToggle}
+                    onClick={handleToggleTheme}
+                    title={isDark ? 'Mode terang' : 'Mode gelap'}
+                    aria-label={isDark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap'}
+                >
+                    {isDark ? <Sun size={18} /> : <Moon size={18} />}
                 </button>
 
-                <button className={styles.topbarIconBtn} onClick={() => navigate('/notifikasi')}>
+                <button className={styles.topbarIconBtn} onClick={() => navigate('/notifikasi')} title="Notifikasi">
                     <Bell size={18} />
-                    <span className={styles.topbarBadge}>3</span>
+                    {unreadCount > 0 && (
+                        <span className={styles.topbarBadge} style={{ minWidth: '16px', padding: '0 4px' }}>
+                            {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                    )}
                 </button>
 
                 <div className={styles.topbarDivider} />

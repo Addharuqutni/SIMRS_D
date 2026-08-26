@@ -1,3 +1,4 @@
+import { formatRp } from '../../lib/format';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Printer, CheckCircle, User, CreditCard } from 'lucide-react';
@@ -23,7 +24,6 @@ export function BillingDetail() {
     const bpjsCover = total;
     const patientPay = 0;
 
-    const formatRp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
     const handleFinalize = () => {
         setFinalized(true);

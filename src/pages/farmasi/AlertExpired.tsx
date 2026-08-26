@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { AlertTriangle, Clock, Trash2, Package, RefreshCcw } from 'lucide-react';
 import { Button, StatusBadge, SearchBar, FilterTabs, Pagination, Card, ConfirmDialog, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
+import { useMedicines } from '../../hooks/useInventory';
+import type { ObatItem } from '../../lib/api/inventory';
 import styles from '../registrasi/registrasi.module.css';
 
 interface ExpiredItem {
@@ -10,14 +12,37 @@ interface ExpiredItem {
     supplier: string;
 }
 
-const initialItems: ExpiredItem[] = [];
+// Jendela "Mendekati ED": 90 hari ke depan dari hari ini
+const WARNING_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+// Derive alert items dari data stok nyata: hanya item dengan ED terdekat
+// (dari stock_batches via GET /inventory) yang sudah lewat atau < 90 hari.
+const buildItems = (medicines: ObatItem[]): ExpiredItem[] => {
+    const now = Date.now();
+    return medicines
+        .filter((o) => !!o.ed)
+        .map((o) => {
+            const edTime = new Date(o.ed).getTime();
+            const status: ExpiredItem['status'] = edTime < now
+                ? 'expired'
+                : edTime < now + WARNING_WINDOW_MS ? 'warning' : 'aman';
+            return {
+                kode: o.kode, nama: o.nama, kategori: o.kategori, bentuk: o.bentuk,
+                stok: o.stok, ed: o.ed, status, supplier: o.supplier,
+            };
+        })
+        .filter((i) => i.status !== 'aman');
+};
 
 export function AlertExpired() {
-    const [items, setItems] = useState<ExpiredItem[]>(initialItems);
+    const { data: medicines = [], isLoading } = useMedicines();
+    const [dismissed, setDismissed] = useState<string[]>([]);
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState('semua');
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<ExpiredItem | null>(null);
+
+    const items = buildItems(medicines).filter((i) => !dismissed.includes(i.kode));
 
     const filtered = items.filter(item => {
         const matchSearch = search.trim() === '' ||
@@ -34,12 +59,12 @@ export function AlertExpired() {
 
     const handleMusnahkan = () => {
         if (!deleteTarget) return;
-        setItems(prev => prev.filter(i => i.kode !== deleteTarget.kode));
+        setDismissed(prev => [...prev, deleteTarget.kode]);
         showToast(`Item "${deleteTarget.nama}" (${deleteTarget.stok} ${deleteTarget.bentuk}) dimusnahkan dan dicatat`, 'success');
     };
 
     const handleReturnSupplier = (item: ExpiredItem) => {
-        setItems(prev => prev.filter(i => i.kode !== item.kode));
+        setDismissed(prev => [...prev, item.kode]);
         showToast(`Retur ${item.stok} ${item.bentuk} "${item.nama}" ke ${item.supplier} berhasil dicatat`, 'info');
     };
 
@@ -49,6 +74,16 @@ export function AlertExpired() {
         const diff = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         return diff;
     };
+
+    if (isLoading) {
+        return (
+            <div className={styles.page}>
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px', color: 'var(--text-secondary)' }}>
+                    Memuat data obat...
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={styles.page}>
@@ -67,7 +102,7 @@ export function AlertExpired() {
                 }}>
                     <AlertTriangle size={24} style={{ color: '#dc2626', flexShrink: 0 }} />
                     <div>
-                        <div style={{ fontWeight: 700, color: '#991b1b' }}>⚠ {expiredCount} Item Telah Kadaluarsa!</div>
+                        <div style={{ fontWeight: 700, color: '#991b1b' }}>{expiredCount} Item Telah Kadaluarsa!</div>
                         <div style={{ fontSize: '13px', color: '#b91c1c' }}>Segera lakukan penarikan dan pemusnahan sesuai prosedur.</div>
                     </div>
                 </div>
@@ -139,7 +174,7 @@ export function AlertExpired() {
                                     </td>
                                     <td>
                                         <StatusBadge variant={item.status === 'expired' ? 'danger' : 'warning'}>
-                                            {item.status === 'expired' ? '❌ Kadaluarsa' : '⚠ Mendekati ED'}
+                                            {item.status === 'expired' ? 'Kadaluarsa' : 'Mendekati ED'}
                                         </StatusBadge>
                                     </td>
                                     <td style={{ fontSize: '13px' }}>{item.supplier}</td>

@@ -1,9 +1,11 @@
+import { formatRp } from '../../lib/format';
 import { useState } from 'react';
 import { BarChart3, TrendingUp, TrendingDown, DollarSign, Download, Calendar, Eye, FileText } from 'lucide-react';
 import { Card, Button, SearchBar, FilterTabs, StatusBadge, Pagination, Modal, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import styles from '../registrasi/registrasi.module.css';
 import { useTransactions } from '../../hooks/useBilling';
+import { api } from '../../lib/axios';
 import type { Transaction } from '../../lib/api/billing';
 
 export function LaporanKeuangan() {
@@ -13,7 +15,53 @@ export function LaporanKeuangan() {
     const [periode, setPeriode] = useState('bulan-ini');
     const [detailModal, setDetailModal] = useState<Transaction | null>(null);
 
-    const formatRp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
+    const exportRlCsv = async () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        try {
+            const res = await api.get('/reports/rl', {
+                params: { year, month, format: 'csv' },
+                responseType: 'blob',
+            });
+            const url = URL.createObjectURL(res.data);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `rl_${year}_${month}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast(`Laporan RL ${month}/${year} berhasil diekspor`, 'success');
+        } catch {
+            showToast('Gagal mengekspor laporan RL', 'danger');
+        }
+    };
+
+
+    const exportRl2bCsv = async () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        try {
+            const res = await api.get('/reports/rl2b', {
+                params: { year, month, format: 'csv' },
+                responseType: 'blob',
+            });
+            const url = URL.createObjectURL(res.data);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `rl2b_${year}_${month}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast(`Laporan RL 2b (Morbiditas) ${month}/${year} berhasil diekspor`, 'success');
+        } catch {
+            showToast('Gagal mengekspor laporan RL 2b', 'danger');
+        }
+    };
+
 
     const filtered = transaksi.filter((t: Transaction) => {
         const matchSearch = search.trim() === '' ||
@@ -40,6 +88,12 @@ export function LaporanKeuangan() {
                         <option value="kuartal-ini">Kuartal Ini</option>
                         <option value="tahun-ini">Tahun Ini</option>
                     </select>
+                    <Button variant="secondary" onClick={exportRlCsv}>
+                        <FileText size={16} /> Export RL (CSV)
+                    </Button>
+                    <Button variant="secondary" onClick={exportRl2bCsv}>
+                        <FileText size={16} /> Export RL 2b (CSV)
+                    </Button>
                     <Button variant="secondary" onClick={() => showToast('Mengekspor laporan ke Excel...', 'info')}>
                         <Download size={16} /> Export (.xlsx)
                     </Button>

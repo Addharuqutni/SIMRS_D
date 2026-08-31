@@ -288,4 +288,3 @@ cd server && npm run build   # Output ke server/dist/
 
 ---
 
-*Dibangun dengan ❤️ oleh Tim Pengembang SIMRS RS.*

@@ -1,181 +1,155 @@
 import { Router } from 'express';
 import { db } from '../../db';
 import { medicines, stockBatches, stockMutations, inventoryLocations, stockByLocation, stockTransfers } from '../../db/schemas/inventory';
-import { users } from '../../db/schemas/auth';
-import { notifications } from '../../db/schemas/notify';
-import { eq, sql, and, inArray } from 'drizzle-orm';
+import { eq, sql, and, desc, ilike, or, lt, gt } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../../middleware/auth';
-import { ROLE_GROUPS } from '../../utils/roles';
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../middleware/error';
-import { logger } from '../../utils/logger';
 import { z } from 'zod';
-import { createMedicineSchema, updateMedicineSchema, deleteMedicineSchema, createReceptionSchema, createOpnameSchema } from './schema';
+import { NEAR_EXPIRY_DAYS } from '../../../../shared/inventory';
+import { readPageParams, toPage } from '../../utils/pagination';
+import { DomainError, notFound } from '../../utils/domain-error';
+import { adjustToCount, notifyLowStock, receiveBatch, removeBatch, type StockLevel } from './stock';
+import { createMedicineSchema, updateMedicineSchema, deleteMedicineSchema, createReceptionSchema, createOpnameSchema, disposeBatchSchema } from './schema';
 
 const router = Router();
 
-// Fire-and-forget low-stock notification for Apoteker/Superadmin (one row per user).
-// Dedupe: skip while an unread notification with the same title (same medicine) exists.
-const notifyLowStock = async (meds: { nama: string; stok: number; minStok: number }[]) => {
-    try {
-        const low = meds.filter((m) => m.stok < m.minStok);
-        if (!low.length) return;
+async function medicineByKode(kode: string) {
+    const [med] = await db.select().from(medicines).where(eq(medicines.kodeObat, kode)).limit(1);
+    if (!med) throw notFound(`Obat dengan kode ${kode}`);
+    return med;
+}
 
-        const targets = await db.select({ id: users.id }).from(users)
-            .where(inArray(users.role, ['Apoteker', 'Superadmin']));
-        if (!targets.length) return;
+// GET medicines — paginated; each row carries its earliest unexpired batch (ed + supplier)
+router.get('/', requireAuth, requireRole('pharmacy'), asyncHandler(async (req, res) => {
+    const p = readPageParams(req);
+    const where = p.q ? or(ilike(medicines.nama, `%${p.q}%`), ilike(medicines.kodeObat, `%${p.q}%`)) : undefined;
+    const [meds, [{ total }]] = await Promise.all([
+        db.select().from(medicines).where(where).orderBy(medicines.nama).limit(p.limit).offset(p.offset),
+        db.select({ total: sql<number>`count(*)::int` }).from(medicines).where(where),
+    ]);
 
-        for (const med of low) {
-            const title = `Stok Menipis: ${med.nama}`;
-            const existing = await db.select({ id: notifications.id }).from(notifications)
-                .where(and(eq(notifications.title, title), eq(notifications.isRead, false)))
-                .limit(1);
-            if (existing.length) continue;
-
-            await db.insert(notifications).values(targets.map((u) => ({
-                userId: u.id,
-                title,
-                message: `Stok ${med.nama} tersisa ${med.stok} (di bawah minimum ${med.minStok}). Segera lakukan pemesanan ulang.`,
-                type: 'warning',
-                linkUrl: '/farmasi/stok',
-            })));
-        }
-    } catch (err) {
-        logger.error(`Gagal mengirim notifikasi stok menipis: ${err instanceof Error ? err.message : err}`);
-    }
-};
-
-// GET all medicines, enriched with the earliest unexpired batch (ed + supplier)
-router.get('/', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), asyncHandler(async (req, res) => {
-    const meds = await db.select().from(medicines);
-
-    // DISTINCT ON picks, per medicine, the batch row with the smallest expired_date
-    // among batches that have not expired yet.
-    const earliest = await db.execute<{ medicine_id: number; expired_date: string; supplier: string | null }>(sql`
+    // DISTINCT ON picks, per medicine, the unexpired batch with the smallest expired_date.
+    const earliest = meds.length ? await db.execute<{ medicine_id: number; expired_date: string; supplier: string | null }>(sql`
         SELECT DISTINCT ON (medicine_id) medicine_id, expired_date, supplier
         FROM stock_batches
-        WHERE expired_date >= CURRENT_DATE
+        WHERE expired_date >= CURRENT_DATE AND qty_sisa > 0
+          AND medicine_id IN (${sql.join(meds.map((m) => sql`${m.id}`), sql`, `)})
         ORDER BY medicine_id, expired_date ASC
-    `);
+    `) : { rows: [] };
     const edMap = new Map(earliest.rows.map((b) => [b.medicine_id, b]));
 
-    res.json(meds.map((m) => ({
+    res.json(toPage(meds.map((m) => ({
         ...m,
         ed: edMap.get(m.id)?.expired_date ?? null,
         supplier: edMap.get(m.id)?.supplier ?? null,
-    })));
+    })), Number(total), p));
 }));
-// POST new medicine
-router.post('/', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(createMedicineSchema), asyncHandler(async (req, res) => {
-    const newItem = await db.insert(medicines).values(req.body).returning();
-    res.status(201).json(newItem[0]);
+
+// GET batches that are expired or expire within NEAR_EXPIRY_DAYS, still holding stock
+router.get('/batches/expiring', requireAuth, requireRole('pharmacy'), asyncHandler(async (_req, res) => {
+    const rows = await db.select({
+        id: stockBatches.id,
+        noBatch: stockBatches.noBatch,
+        expiredDate: stockBatches.expiredDate,
+        qtySisa: stockBatches.qtySisa,
+        supplier: stockBatches.supplier,
+        kodeObat: medicines.kodeObat,
+        nama: medicines.nama,
+        kategori: medicines.kategori,
+        satuan: medicines.satuan,
+        expired: sql<boolean>`${stockBatches.expiredDate} < CURRENT_DATE`,
+    })
+        .from(stockBatches)
+        .innerJoin(medicines, eq(stockBatches.medicineId, medicines.id))
+        .where(and(gt(stockBatches.qtySisa, 0), lt(stockBatches.expiredDate, sql`CURRENT_DATE + ${NEAR_EXPIRY_DAYS}::int`)))
+        .orderBy(stockBatches.expiredDate);
+    res.json(rows);
+}));
+
+// POST take a batch out of stock: dimusnahkan (expired) or diretur ke supplier
+router.post('/batches/:id/dispose', requireAuth, requireRole('pharmacy'), validate(disposeBatchSchema), asyncHandler(async (req, res) => {
+    const { jenis, catatan } = req.body as z.infer<typeof disposeBatchSchema>['body'];
+    const level = await db.transaction((tx) => removeBatch(tx, Number(req.params.id), jenis,
+        `${jenis === 'MUSNAH' ? 'Pemusnahan' : 'Retur'} oleh ${req.user?.name ?? 'system'}${catatan ? ` — ${catatan}` : ''}`));
+    await notifyLowStock(db, [level]);
+    res.json({ success: true, stok: level.stok });
+}));
+
+// GET kartu stok: all movements for one medicine, newest first
+router.get('/:kode/mutations', requireAuth, requireRole('pharmacy'), asyncHandler(async (req, res) => {
+    const med = await medicineByKode(req.params.kode);
+    const rows = await db.select({
+        id: stockMutations.id,
+        jenis: stockMutations.jenis,
+        qty: stockMutations.qty,
+        keterangan: stockMutations.keterangan,
+        referensi: stockMutations.referensi,
+        createdAt: stockMutations.createdAt,
+        noBatch: stockBatches.noBatch,
+    })
+        .from(stockMutations)
+        .leftJoin(stockBatches, eq(stockMutations.batchId, stockBatches.id))
+        .where(eq(stockMutations.medicineId, med.id))
+        .orderBy(desc(stockMutations.createdAt), desc(stockMutations.id))
+        .limit(200);
+    res.json(rows);
+}));
+
+// POST new medicine — stock starts at 0 and only grows through reception
+router.post('/', requireAuth, requireRole('pharmacy'), validate(createMedicineSchema), asyncHandler(async (req, res) => {
+    const [dup] = await db.select({ id: medicines.id }).from(medicines).where(eq(medicines.kodeObat, req.body.kodeObat)).limit(1);
+    if (dup) throw new DomainError(`Kode obat ${req.body.kodeObat} sudah terdaftar`, 409);
+
+    const [created] = await db.insert(medicines).values(req.body).returning();
+    res.status(201).json(created);
 }));
 
 // POST goods reception (Penerimaan Barang): new batch + MASUK mutation + stock increment
-router.post('/reception', requireAuth, requireRole(...ROLE_GROUPS.admin, ...ROLE_GROUPS.pharmacy), validate(createReceptionSchema), asyncHandler(async (req, res) => {
-    const { kodeObat, noBatch, noFaktur, supplier, qty, expiredDate, hargaBeli } = req.body;
-
-    const found = await db.select().from(medicines).where(eq(medicines.kodeObat, kodeObat)).limit(1);
-    if (!found.length) {
-        return res.status(404).json({ error: `Obat dengan kode ${kodeObat} tidak ditemukan` });
-    }
-    const medicine = found[0];
-
-    const batch = await db.transaction(async (tx) => {
-        const newBatch = await tx.insert(stockBatches).values({
-            medicineId: medicine.id,
-            noBatch,
-            expiredDate,
-            qtyMasuk: qty,
-            qtySisa: qty,
-            supplier,
-        }).returning();
-
-        await tx.insert(stockMutations).values({
-            medicineId: medicine.id,
-            batchId: newBatch[0].id,
-            jenis: 'MASUK',
-            qty,
-            keterangan: `Penerimaan barang dari ${supplier}`,
-            referensi: noFaktur,
-        });
-
-        await tx.update(medicines).set({
-            stok: sql`${medicines.stok} + ${qty}`,
-            ...(hargaBeli !== undefined ? { hargaBeli } : {}),
-        }).where(eq(medicines.id, medicine.id));
-
-        return newBatch[0];
-    });
-
-    res.status(201).json({ ...batch, stok: medicine.stok + qty });
+router.post('/reception', requireAuth, requireRole('admin', 'pharmacy'), validate(createReceptionSchema), asyncHandler(async (req, res) => {
+    const med = await medicineByKode(req.body.kodeObat);
+    const batch = await db.transaction((tx) => receiveBatch(tx, { ...req.body, medicineId: med.id }));
+    res.status(201).json(batch);
 }));
 
 // POST stok opname (penyesuaian): align system stock with the physical count
-router.post('/opname', requireAuth, requireRole(...ROLE_GROUPS.admin, ...ROLE_GROUPS.pharmacy), validate(createOpnameSchema), asyncHandler(async (req, res) => {
-    const { items } = req.body;
+router.post('/opname', requireAuth, requireRole('admin', 'pharmacy'), validate(createOpnameSchema), asyncHandler(async (req, res) => {
+    const items = req.body.items as z.infer<typeof createOpnameSchema>['body']['items'];
     const userName = req.user?.name || 'system';
 
     const processed: { kodeObat: string; nama: string; stokSistem: number; stokFisik: number; selisih: number }[] = [];
-    const notFound: string[] = [];
-    const affected: { nama: string; stok: number; minStok: number }[] = [];
+    const unknown: string[] = [];
+    const levels: StockLevel[] = [];
 
     for (const item of items) {
-        const result = await db.transaction(async (tx) => {
-            const found = await tx.select().from(medicines).where(eq(medicines.kodeObat, item.kodeObat)).limit(1);
-            if (!found.length) return null;
-            const medicine = found[0];
-
-            const selisih = item.stokFisik - medicine.stok;
-            if (selisih !== 0) {
-                const arah = selisih > 0 ? 'penambahan' : 'pengurangan';
-                await tx.insert(stockMutations).values({
-                    medicineId: medicine.id,
-                    jenis: 'PENYESUAIAN',
-                    qty: Math.abs(selisih),
-                    keterangan: `Stok Opname oleh ${userName}: ${arah} ${Math.abs(selisih)} (sistem ${medicine.stok} → fisik ${item.stokFisik})${item.catatan ? ` — ${item.catatan}` : ''}`,
-                    referensi: 'STOK OPNAME',
-                });
-
-                await tx.update(medicines).set({ stok: item.stokFisik }).where(eq(medicines.id, medicine.id));
-            }
-
-            return { medicine, selisih };
-        });
-
-        if (!result) {
-            notFound.push(item.kodeObat);
+        const [med] = await db.select({ id: medicines.id }).from(medicines).where(eq(medicines.kodeObat, item.kodeObat)).limit(1);
+        if (!med) {
+            unknown.push(item.kodeObat);
             continue;
         }
-        processed.push({
-            kodeObat: item.kodeObat,
-            nama: result.medicine.nama,
-            stokSistem: result.medicine.stok,
-            stokFisik: item.stokFisik,
-            selisih: result.selisih,
-        });
-        affected.push({ nama: result.medicine.nama, stok: item.stokFisik, minStok: result.medicine.minStok });
+        const r = await db.transaction((tx) => adjustToCount(tx, med.id, item.stokFisik,
+            `Stok Opname oleh ${userName}${item.catatan ? ` — ${item.catatan}` : ''}`));
+        processed.push({ kodeObat: item.kodeObat, nama: r.medicine.nama, stokSistem: r.medicine.stok, stokFisik: item.stokFisik, selisih: r.selisih });
+        levels.push(r.level);
     }
 
-    // Fire-and-forget: never fails the opname
-    void notifyLowStock(affected);
-
-    res.status(201).json({ processed, notFound });
+    await notifyLowStock(db, levels);
+    res.status(201).json({ processed, notFound: unknown });
 }));
 
-// PUT update medicine
-router.put('/:kode', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(updateMedicineSchema), asyncHandler(async (req, res) => {
-    const kodeParam = req.params.kode as string;
-    await db.update(medicines).set({ ...req.body, updatedAt: new Date() }).where(eq(medicines.kodeObat, kodeParam));
+// PUT update medicine master data (stock changes go through reception/opname)
+router.put('/:kode', requireAuth, requireRole('pharmacy'), validate(updateMedicineSchema), asyncHandler(async (req, res) => {
+    await db.update(medicines).set(req.body).where(eq(medicines.kodeObat, req.params.kode));
     res.json({ success: true });
 }));
 
-// DELETE medicine
-router.delete('/:kode', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(deleteMedicineSchema), asyncHandler(async (req, res) => {
-    const kodeParam = req.params.kode as string;
-    // Optional: you can choose to soft-delete by changing status if there are FK constraints
-    await db.delete(medicines).where(eq(medicines.kodeObat, kodeParam));
-    res.json({ success: true, message: 'Item deleted' });
+// DELETE medicine — only when it has never moved stock
+router.delete('/:kode', requireAuth, requireRole('pharmacy'), validate(deleteMedicineSchema), asyncHandler(async (req, res) => {
+    const med = await medicineByKode(req.params.kode);
+    const [used] = await db.select({ id: stockMutations.id }).from(stockMutations).where(eq(stockMutations.medicineId, med.id)).limit(1);
+    if (used) throw new DomainError('Obat sudah memiliki riwayat mutasi stok dan tidak dapat dihapus', 409);
+    await db.delete(medicines).where(eq(medicines.id, med.id));
+    res.json({ success: true });
 }));
 
 // ==========================================
@@ -196,13 +170,13 @@ const createLocationSchema = z.object({
         tipe: z.enum(['farmasi', 'depot', 'ok', 'igd']).optional(),
     }),
 });
-router.post('/locations', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(createLocationSchema), asyncHandler(async (req, res) => {
+router.post('/locations', requireAuth, requireRole('pharmacy'), validate(createLocationSchema), asyncHandler(async (req, res) => {
     const created = await db.insert(inventoryLocations).values(req.body).returning();
     res.status(201).json(created[0]);
 }));
 
 // GET stock by location for a given medicine (or all medicines at a location)
-router.get('/stock-by-location', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), asyncHandler(async (req, res) => {
+router.get('/stock-by-location', requireAuth, requireRole('pharmacy'), asyncHandler(async (req, res) => {
     const medicineId = req.query.medicineId ? Number(req.query.medicineId) : undefined;
     const locationId = req.query.locationId ? Number(req.query.locationId) : undefined;
 
@@ -245,67 +219,43 @@ const transferSchema = z.object({
         catatan: z.string().max(500).optional(),
     }),
 });
-router.post('/transfer', requireAuth, requireRole(...ROLE_GROUPS.pharmacy), validate(transferSchema), asyncHandler(async (req, res) => {
+router.post('/transfer', requireAuth, requireRole('pharmacy'), validate(transferSchema), asyncHandler(async (req, res) => {
     const { medicineId, fromLocationId, toLocationId, qty, catatan } = req.body;
 
-    if (fromLocationId === toLocationId) {
-        return res.status(400).json({ error: 'Lokasi asal dan tujuan tidak boleh sama' });
-    }
+    if (fromLocationId === toLocationId) throw new DomainError('Lokasi asal dan tujuan tidak boleh sama', 400);
 
     const result = await db.transaction(async (tx) => {
-        // 1. Verify source has enough stock
-        const src = await db.select().from(stockByLocation)
+        const [src] = await tx.select().from(stockByLocation)
             .where(and(eq(stockByLocation.medicineId, medicineId), eq(stockByLocation.locationId, fromLocationId)))
-            .limit(1);
-        if (!src.length || src[0].stok < qty) {
-            throw new Error('Stok di lokasi asal tidak mencukupi');
-        }
+            .for('update');
+        if (!src || src.stok < qty) throw new DomainError('Stok di lokasi asal tidak mencukupi', 409);
 
-        // 2. Decrement source
         await tx.update(stockByLocation)
-            .set({ stok: src[0].stok - qty, updatedAt: new Date() })
-            .where(eq(stockByLocation.id, src[0].id));
+            .set({ stok: src.stok - qty, updatedAt: new Date() })
+            .where(eq(stockByLocation.id, src.id));
 
-        // 3. Upsert destination (create row if not exists)
-        const dst = await db.select().from(stockByLocation)
+        const [dst] = await tx.select().from(stockByLocation)
             .where(and(eq(stockByLocation.medicineId, medicineId), eq(stockByLocation.locationId, toLocationId)))
-            .limit(1);
-        if (dst.length) {
-            await tx.update(stockByLocation)
-                .set({ stok: dst[0].stok + qty, updatedAt: new Date() })
-                .where(eq(stockByLocation.id, dst[0].id));
+            .for('update');
+        if (dst) {
+            await tx.update(stockByLocation).set({ stok: dst.stok + qty, updatedAt: new Date() }).where(eq(stockByLocation.id, dst.id));
         } else {
-            await tx.insert(stockByLocation).values({
-                medicineId,
-                locationId: toLocationId,
-                stok: qty,
-            });
+            await tx.insert(stockByLocation).values({ medicineId, locationId: toLocationId, stok: qty });
         }
 
-        // 4. Log the transfer (two mutation rows for audit clarity)
+        const [transfer] = await tx.insert(stockTransfers).values({
+            medicineId, fromLocationId, toLocationId, qty, status: 'selesai', requestedBy: req.user?.name || '-', catatan,
+        }).returning();
+
         await tx.insert(stockMutations).values({
             medicineId,
             jenis: 'TRANSFER',
             qty,
             keterangan: `Transfer ke lokasi ${toLocationId}${catatan ? ': ' + catatan : ''}`,
-            referensi: `TRF-${Date.now()}`,
+            referensi: `TRF-${transfer.id}`,
             locationId: fromLocationId,
         });
-
-        // 5. Create the transfer record
-        const transfer = await tx.insert(stockTransfers).values({
-            medicineId,
-            fromLocationId,
-            toLocationId,
-            qty,
-            status: 'selesai',
-            requestedBy: req.user?.name || '-',
-            catatan,
-        }).returning();
-
-        return transfer[0];
-    }).catch((err: unknown) => {
-        throw new Error(err instanceof Error ? err.message : 'Gagal transfer stok');
+        return transfer;
     });
 
     res.status(201).json({ success: true, data: result });

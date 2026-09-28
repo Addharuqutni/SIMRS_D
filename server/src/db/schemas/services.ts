@@ -1,5 +1,6 @@
-import { pgTable, text, timestamp, varchar, integer, real } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, varchar, integer } from 'drizzle-orm/pg-core';
 import { visits } from './patient';
+import { medicines } from './inventory';
 
 export const prescriptions = pgTable('prescriptions', {
     id: text('id').primaryKey(),
@@ -18,7 +19,7 @@ export const prescriptions = pgTable('prescriptions', {
 export const prescriptionItems = pgTable('prescription_items', {
     id: text('id').primaryKey(),
     prescriptionId: text('prescription_id').notNull().references(() => prescriptions.id),
-    obatId: text('obat_id').notNull(),
+    obatId: integer('obat_id').notNull().references(() => medicines.id),
     dosis: varchar('dosis', { length: 100 }).notNull(),
     jumlah: integer('jumlah').notNull(),
     keterangan: text('keterangan'),

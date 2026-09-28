@@ -1,10 +1,15 @@
+import { api } from '../axios';
+import type { Page, PageQuery } from '../../../shared/page';
+
 export interface ObatItem {
+    id: number;
     kode: string;
     nama: string;
     kategori: string;
     bentuk: string;
     stok: number;
     min: number;
+    /** Earliest unexpired batch ED, or '' when no stocked batch. */
     ed: string;
     harga: number;
     supplier: string;
@@ -26,82 +31,70 @@ export interface OpnameItemPayload {
     catatan?: string;
 }
 
-export interface OpnamePayload {
-    items: OpnameItemPayload[];
+export interface StockMutation {
+    id: number;
+    jenis: 'MASUK' | 'KELUAR' | 'PENYESUAIAN' | 'TRANSFER' | 'MUSNAH' | 'RETUR';
+    qty: number;
+    keterangan: string | null;
+    referensi: string | null;
+    createdAt: string;
+    noBatch: string | null;
 }
 
-import { api } from '../axios';
+export interface ExpiringBatch {
+    id: number;
+    noBatch: string;
+    expiredDate: string;
+    qtySisa: number;
+    supplier: string | null;
+    kodeObat: string;
+    nama: string;
+    kategori: string | null;
+    satuan: string | null;
+    expired: boolean;
+}
+
+interface MedicineRow {
+    id: number; kodeObat: string; nama: string; kategori: string | null; satuan: string | null;
+    stok: number; minStok: number; hargaJual: number; ed: string | null; supplier: string | null;
+}
+
+const toObat = (u: MedicineRow): ObatItem => ({
+    id: u.id,
+    kode: u.kodeObat,
+    nama: u.nama,
+    kategori: u.kategori ?? '-',
+    bentuk: u.satuan ?? '-',
+    stok: u.stok,
+    min: u.minStok,
+    ed: u.ed ?? '',
+    harga: u.hargaJual,
+    supplier: u.supplier ?? '-',
+});
+
+const toPayload = (data: Partial<ObatItem>) => ({
+    nama: data.nama,
+    kategori: data.kategori,
+    satuan: data.bentuk,
+    minStok: data.min,
+    hargaJual: data.harga,
+});
 
 export const inventoryApi = {
-    getMedicines: async (): Promise<ObatItem[]> => {
-        const res = await api.get('/inventory');
-        return res.data.map((u: {
-            kodeObat: string, nama: string, kategori: string, satuan?: string,
-            stok?: number, minStok?: number, hargaJual?: number,
-            ed?: string | null, supplier?: string | null,
-        }) => ({
-            kode: u.kodeObat,
-            nama: u.nama,
-            kategori: u.kategori,
-            bentuk: u.satuan || 'Tablet',
-            stok: u.stok ?? 0,
-            min: u.minStok || 20,
-            ed: u.ed || '',
-            harga: u.hargaJual || 0,
-            supplier: u.supplier || '-',
-        }));
+    listMedicines: async (q: PageQuery): Promise<Page<ObatItem>> => {
+        const res = await api.get<Page<MedicineRow>>('/inventory', { params: q });
+        return { ...res.data, data: res.data.data.map(toObat) };
     },
-    createMedicine: async (data: Partial<ObatItem>) => {
-        const payload = {
-            kodeObat: data.kode,
-            nama: data.nama,
-            kategori: data.kategori,
-            satuan: data.bentuk,
-            minStok: data.min,
-            hargaJual: data.harga
-        };
-        const res = await api.post('/inventory', payload);
-        return res.data;
-    },
-    updateMedicine: async (kode: string, data: Partial<ObatItem>) => {
-        const payload = {
-            nama: data.nama,
-            kategori: data.kategori,
-            satuan: data.bentuk,
-            minStok: data.min,
-            hargaJual: data.harga
-        };
-        const res = await api.put(`/inventory/${kode}`, payload);
-        return res.data;
-    },
-    deleteMedicine: async (kode: string) => {
-        const res = await api.delete(`/inventory/${kode}`);
-        return res.data;
-    },
-    createReception: async (data: ReceptionPayload) => {
-        const res = await api.post('/inventory/reception', data);
-        return res.data;
-    },
-    submitOpname: async (data: OpnamePayload) => {
-        const res = await api.post('/inventory/opname', data);
-        return res.data;
-    },
-
-    // ===== MULTI-WAREHOUSE =====
-    getLocations: async () => {
-        const res = await api.get('/inventory/locations');
-        return res.data;
-    },
-    createLocation: async (data: { kode: string; nama: string; tipe?: string }) => {
-        const res = await api.post('/inventory/locations', data);
-        return res.data;
-    },
-    getStockByLocation: async (params?: { medicineId?: number; locationId?: number }) => {
-        const res = await api.get('/inventory/stock-by-location', { params });
-        return res.data;
-    },
-    transferStock: async (data: { medicineId: number; fromLocationId: number; toLocationId: number; qty: number; catatan?: string }) => {
-        const res = await api.post('/inventory/transfer', data);
-        return res.data;
-    },
+    createMedicine: (data: Partial<ObatItem>) =>
+        api.post('/inventory', { kodeObat: data.kode, ...toPayload(data) }).then((res) => res.data),
+    updateMedicine: (kode: string, data: Partial<ObatItem>) =>
+        api.put(`/inventory/${kode}`, toPayload(data)).then((res) => res.data),
+    deleteMedicine: (kode: string) => api.delete(`/inventory/${kode}`).then((res) => res.data),
+    createReception: (data: ReceptionPayload) => api.post('/inventory/reception', data).then((res) => res.data),
+    submitOpname: (items: OpnameItemPayload[]) =>
+        api.post<{ processed: unknown[]; notFound: string[] }>('/inventory/opname', { items }).then((res) => res.data),
+    getMutations: (kode: string) => api.get<StockMutation[]>(`/inventory/${kode}/mutations`).then((res) => res.data),
+    getExpiringBatches: () => api.get<ExpiringBatch[]>('/inventory/batches/expiring').then((res) => res.data),
+    disposeBatch: (id: number, jenis: 'MUSNAH' | 'RETUR', catatan?: string) =>
+        api.post(`/inventory/batches/${id}/dispose`, { jenis, catatan }).then((res) => res.data),
 };

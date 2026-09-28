@@ -1,22 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Pill, CheckCircle, AlertTriangle, QrCode } from 'lucide-react';
-import { SearchBar, FilterTabs, StatusBadge, Button, Card, Pagination, QRCode, showToast } from '../../components/ui';
+import { SearchBar, FilterTabs, StatusBadge, Button, Card, Pagination, QRCode, showToast, LifecycleBadge } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import styles from '../registrasi/registrasi.module.css';
-import { usePrescriptions, usePrescriptionDetail, useUpdatePrescriptionStatus } from '../../hooks/usePharmacy';
+import { usePrescriptionList, usePrescriptionDetail, useUpdatePrescriptionStatus } from '../../hooks/usePharmacy';
 import { useSignERecipe } from '../../hooks/useClinical';
-import type { Prescription, PrescriptionItem } from '../../lib/api/pharmacy';
-
-const statusMap: Record<string, { label: string; variant: 'success' | 'warning' | 'danger' | 'info' | 'neutral' }> = {
-    baru: { label: 'Baru', variant: 'danger' },
-    proses: { label: 'Diproses', variant: 'warning' },
-    selesai: { label: 'Diserahkan', variant: 'success' },
-};
+import { errorMessage } from '../../lib/api-error';
 
 export function FarmasiResep() {
-    const { data: resepList = [] } = usePrescriptions();
-    const [search, setSearch] = useState('');
-    const [filter, setFilter] = useState('semua');
+    const list = usePrescriptionList();
+    const resepList = list.rows;
     const [selectedId, setSelectedId] = useState('');
 
     const { data: detail } = usePrescriptionDetail(selectedId);
@@ -34,21 +27,12 @@ export function FarmasiResep() {
         if (!selectedId && resepList.length > 0) setSelectedId(resepList[0].id);
     }, [resepList, selectedId]);
 
-    const filtered = resepList.filter((r: Prescription) => {
-        const matchSearch = search.trim() === '' ||
-            (r.patientName?.toLowerCase().includes(search.toLowerCase()) || '') ||
-            (r.noResep.toLowerCase().includes(search.toLowerCase())) ||
-            (r.rm?.includes(search) || '');
-        const matchFilter = filter === 'semua' || r.status === filter;
-        return matchSearch && matchFilter;
-    });
-
     const handleTerima = async () => {
         try {
             await updateMutation.mutateAsync({ id: selectedId, status: 'proses' });
             showToast(`Resep ${detail?.noResep} diterima dan sedang diproses`, 'info');
-        } catch {
-            showToast('Gagal memproses resep', 'danger');
+        } catch (err) {
+            showToast(errorMessage(err, 'Gagal memproses resep'), 'danger');
         }
     };
 
@@ -56,8 +40,8 @@ export function FarmasiResep() {
         try {
             await updateMutation.mutateAsync({ id: selectedId, status: 'selesai' });
             showToast(`Obat resep ${detail?.noResep} berhasil diserahkan dan mutasi stok dicatat`, 'success');
-        } catch {
-            showToast('Gagal menyerahkan resep', 'danger');
+        } catch (err) {
+            showToast(errorMessage(err, 'Gagal menyerahkan resep'), 'danger');
         }
     };
 
@@ -66,12 +50,12 @@ export function FarmasiResep() {
             const result = await signERecipe.mutateAsync(selectedId);
             setERecipe({ eRecipeCode: result.eRecipeCode, qrString: result.qrString });
             showToast(`e-Recipe ${result.eRecipeCode} berhasil ditandatangani`, 'success');
-        } catch {
-            showToast('Gagal menandatangani e-Recipe', 'danger');
+        } catch (err) {
+            showToast(errorMessage(err, 'Gagal menandatangani e-Recipe'), 'danger');
         }
     };
 
-    const currentResep = resepList.find((r: Prescription) => r.id === selectedId);
+    const currentStatus = detail?.status;
 
     return (
         <div className={styles.page}>
@@ -81,16 +65,16 @@ export function FarmasiResep() {
 
             <div className={styles.toolbar}>
                 <div className={styles.toolbarSearch}>
-                    <SearchBar placeholder="Cari resep, pasien, RM..." value={search} onChange={setSearch} />
+                    <SearchBar placeholder="Cari resep, pasien, RM..." value={list.search} onChange={list.setSearch} />
                 </div>
                 <FilterTabs
                     tabs={[
-                        { label: 'Semua', value: 'semua', count: resepList.length },
-                        { label: 'Baru', value: 'baru', count: resepList.filter((r: Prescription) => r.status === 'baru').length },
-                        { label: 'Proses', value: 'proses', count: resepList.filter((r: Prescription) => r.status === 'proses').length },
-                        { label: 'Selesai', value: 'selesai', count: resepList.filter((r: Prescription) => r.status === 'selesai').length },
+                        { label: 'Semua', value: 'semua', count: list.totalAll },
+                        { label: 'Baru', value: 'baru', count: list.counts.baru ?? 0 },
+                        { label: 'Proses', value: 'proses', count: list.counts.proses ?? 0 },
+                        { label: 'Selesai', value: 'selesai', count: list.counts.selesai ?? 0 },
                     ]}
-                    active={filter} onChange={setFilter}
+                    active={list.status} onChange={list.setStatus}
                 />
             </div>
 
@@ -102,30 +86,27 @@ export function FarmasiResep() {
                             <tr><th>No. Resep</th><th>Pasien</th><th>Dokter</th><th>Waktu</th><th>Status</th></tr>
                         </thead>
                         <tbody className="stagger">
-                            {filtered.length === 0 ? (
+                            {resepList.length === 0 ? (
                                 <tr><td colSpan={5} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Tidak ada resep ditemukan</td></tr>
-                            ) : filtered.map((r: Prescription) => {
-                                const st = statusMap[r.status];
-                                return (
-                                    <tr key={r.id}
-                                        style={{ cursor: 'pointer', background: selectedId === r.id ? 'var(--bg-active)' : undefined }}
-                                        onClick={() => setSelectedId(r.id)}>
-                                        <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{r.noResep}</td>
-                                        <td>
-                                            <div className={styles.nameCell}>
-                                                <span className={styles.namePrimary}>{r.patientName}</span>
-                                                <span className={styles.nameSecondary}>RM: {r.rm}</span>
-                                            </div>
-                                        </td>
-                                        <td>{r.dokterName || r.dokterId}</td>
-                                        <td>{new Date(r.waktuResep).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                                        <td><StatusBadge variant={st.variant}>{st.label}</StatusBadge></td>
-                                    </tr>
-                                );
-                            })}
+                            ) : resepList.map((r) => (
+                                <tr key={r.id}
+                                    style={{ cursor: 'pointer', background: selectedId === r.id ? 'var(--bg-active)' : undefined }}
+                                    onClick={() => setSelectedId(r.id)}>
+                                    <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{r.noResep}</td>
+                                    <td>
+                                        <div className={styles.nameCell}>
+                                            <span className={styles.namePrimary}>{r.patientName}</span>
+                                            <span className={styles.nameSecondary}>RM: {r.rm}</span>
+                                        </div>
+                                    </td>
+                                    <td>{r.dokterName || r.dokterId}</td>
+                                    <td>{new Date(r.waktuResep).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                                    <td><LifecycleBadge kind="resep" status={r.status} /></td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
-                    <Pagination currentPage={1} totalPages={1} totalItems={filtered.length} onPageChange={() => { }} />
+                    <Pagination {...list.paginationProps} />
                 </div>
 
                 {/* Right — detail */}
@@ -138,13 +119,9 @@ export function FarmasiResep() {
                             <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
                                 Dokter: <strong style={{ color: 'var(--text)' }}>{detail.dokterName || detail.dokterId}</strong>
                             </div>
-                            {currentResep && (
-                                <div style={{ marginTop: '8px' }}>
-                                    <StatusBadge variant={statusMap[currentResep.status]?.variant || 'neutral'}>
-                                        {statusMap[currentResep.status]?.label || currentResep.status}
-                                    </StatusBadge>
-                                </div>
-                            )}
+                            <div style={{ marginTop: '8px' }}>
+                                <LifecycleBadge kind="resep" status={detail.status} />
+                            </div>
                         </div>
 
                         <table className={uiStyles.table}>
@@ -152,17 +129,17 @@ export function FarmasiResep() {
                                 <tr><th>Obat</th><th>Dosis</th><th>Jml</th><th>Stok</th><th>Ketersediaan</th></tr>
                             </thead>
                             <tbody>
-                                {detail.items?.map((item: PrescriptionItem, i: number) => {
-                                    const tersedia = item.stok >= item.jumlah;
+                                {detail.items?.map((item) => {
+                                    const tersedia = (item.stok ?? 0) >= item.jumlah;
                                     return (
-                                        <tr key={i}>
+                                        <tr key={item.id}>
                                             <td style={{ fontWeight: 500 }}>{item.namaObat || item.obatId}</td>
                                             <td>{item.dosis}</td>
                                             <td>{item.jumlah}</td>
-                                            <td>{item.stok}</td>
+                                            <td>{item.stok ?? '-'}</td>
                                             <td>
                                                 {tersedia ? (
-                                                    <StatusBadge variant="success">✅ Memenuhi</StatusBadge>
+                                                    <StatusBadge variant="success">Memenuhi</StatusBadge>
                                                 ) : (
                                                     <StatusBadge variant="warning">
                                                         <AlertTriangle size={10} /> Kurang
@@ -176,7 +153,7 @@ export function FarmasiResep() {
                         </table>
 
                         {/* e-Recipe Kemenkes Panel — Sign + QR Code */}
-                        {currentResep && (
+                        {detail && (
                             <div style={{ marginTop: '20px', padding: '16px', background: 'var(--bg, #f9fafb)', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--border-light)' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                                     <strong style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -210,17 +187,17 @@ export function FarmasiResep() {
                             <div style={{ flex: 1 }}>
                                 {updateMutation.isPending && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Menyimpan mutasi stok...</span>}
                             </div>
-                            {currentResep?.status === 'baru' && (
+                            {currentStatus === 'baru' && (
                                 <Button variant="primary" onClick={handleTerima} disabled={updateMutation.isPending}>
                                     <Pill size={14} /> Terima & Proses Resep
                                 </Button>
                             )}
-                            {currentResep?.status === 'proses' && (
+                            {currentStatus === 'proses' && (
                                 <Button variant="primary" onClick={handleSerahkan} disabled={updateMutation.isPending}>
                                     <CheckCircle size={14} /> Serahkan Obat
                                 </Button>
                             )}
-                            {currentResep?.status === 'selesai' && (
+                            {currentStatus === 'selesai' && (
                                 <Button variant="secondary" disabled>
                                     <CheckCircle size={14} /> Telah Diserahkan
                                 </Button>

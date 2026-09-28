@@ -13,6 +13,23 @@
  */
 
 import { createHmac } from 'crypto';
+import { logger } from './logger';
+
+const DEV_SECRET = 'simrs-erecipe-dev-key';
+
+/**
+ * HMAC key for e-Recipe signatures. Production refuses to sign without
+ * ERECIPE_SECRET; development falls back to a fixed key with a warning.
+ */
+export function eRecipeSecret(): string {
+    const secret = process.env.ERECIPE_SECRET;
+    if (secret) return secret;
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('ERECIPE_SECRET belum dikonfigurasi; e-Recipe tidak dapat ditandatangani');
+    }
+    logger.warn('ERECIPE_SECRET tidak diset — memakai kunci pengembangan');
+    return DEV_SECRET;
+}
 
 export interface ERecipeItem {
     namaObat: string;

@@ -40,4 +40,5 @@ export const sepRecords = pgTable('sep_records', {
     tglSep: date('tgl_sep').notNull(),
     ppkRujukan: text('ppk_rujukan'),
     status: varchar('status', { length: 50 }).notNull().default('aktif'), // aktif, terpakai, batal
+    sumber: varchar('sumber', { length: 20 }).notNull().default('bpjs'), // bpjs (VClaim asli), simulasi (adapter lokal)
 });

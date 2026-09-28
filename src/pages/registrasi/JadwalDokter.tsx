@@ -3,67 +3,47 @@ import { Calendar, Plus, Edit2, Trash2, Clock, Users } from 'lucide-react';
 import { Button, StatusBadge, SearchBar, Card, Modal, ConfirmDialog, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import { useSchedules, useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from '../../hooks/useSchedule';
-import { useMasterUsers } from '../../hooks/useMasterData';
-import type { Jadwal } from '../../lib/api/schedule';
+import { useDoctors } from '../../hooks/useMasterData';
+import { HARI, type Jadwal, type JadwalInput } from '../../lib/api/schedule';
+import { errorMessage } from '../../lib/api-error';
+import { POLI_RAWAT_JALAN } from '../../../shared/admission';
 import styles from '../registrasi/registrasi.module.css';
 
-const emptyForm = { dokter: '', spesialis: '', poli: '', hari: '', jam: '', kuotaJkn: 20, kuotaUmum: 10 };
+const emptyForm: JadwalInput = { doctorId: '', poliId: '', dayOfWeek: 1, startTime: '08:00', endTime: '12:00', quota: 20, aktif: true };
 
 export function JadwalDokter() {
-    const { data: dbJadwal = [], isLoading } = useSchedules();
-
-    const currentList = dbJadwal || [];
-
-    const [search, setSearch] = useState('');
-
-    const [modalOpen, setModalOpen] = useState(false);
-    const [editing, setEditing] = useState<Jadwal | null>(null);
-    const [form, setForm] = useState(emptyForm);
-
-    const [confirmOpen, setConfirmOpen] = useState(false);
-    const [deleteTarget, setDeleteTarget] = useState<Jadwal | null>(null);
-
-    // Mutations
+    const { data: jadwal = [], isLoading } = useSchedules();
+    const { data: doctors = [] } = useDoctors();
     const createSchedule = useCreateSchedule();
     const updateSchedule = useUpdateSchedule();
     const deleteSchedule = useDeleteSchedule();
     const isSaving = createSchedule.isPending || updateSchedule.isPending;
-    const isDeleting = deleteSchedule.isPending;
 
-    // Master Users Data for Dropdown
-    const { data: allUsers } = useMasterUsers();
-    const doctorUsers = (allUsers || []).filter((u: any) =>
-        (u.role?.toLowerCase().includes('dokter') || u.role?.toLowerCase() === 'doctor') &&
-        u.status === 'aktif'
-    );
+    const [search, setSearch] = useState('');
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editing, setEditing] = useState<Jadwal | null>(null);
+    const [form, setForm] = useState<JadwalInput>(emptyForm);
+    const [deleteTarget, setDeleteTarget] = useState<Jadwal | null>(null);
 
-    const filtered = currentList.filter(j =>
-        search.trim() === '' ||
-        j.dokter.toLowerCase().includes(search.toLowerCase()) ||
-        j.poli.toLowerCase().includes(search.toLowerCase()) ||
-        j.spesialis.toLowerCase().includes(search.toLowerCase())
-    );
+    const needle = search.trim().toLowerCase();
+    const filtered = jadwal.filter((j) => needle === '' || j.dokter.toLowerCase().includes(needle) || j.poli.toLowerCase().includes(needle));
 
     const openAdd = () => { setEditing(null); setForm(emptyForm); setModalOpen(true); };
     const openEdit = (j: Jadwal) => {
         setEditing(j);
-        setForm({ dokter: j.dokter, spesialis: j.spesialis, poli: j.poli, hari: j.hari, jam: j.jam, kuotaJkn: j.kuotaJkn, kuotaUmum: j.kuotaUmum });
+        setForm({ doctorId: j.doctorId, poliId: j.poli, dayOfWeek: j.dayOfWeek, startTime: j.startTime, endTime: j.endTime, quota: j.quota, aktif: j.aktif });
         setModalOpen(true);
     };
 
     const handleSave = async () => {
-        if (!form.dokter || !form.poli || !form.hari) return;
+        if (!form.doctorId || !form.poliId) { showToast('Dokter dan poli wajib diisi', 'warning'); return; }
         try {
-            if (editing) {
-                await updateSchedule.mutateAsync({ id: editing.id, data: form });
-                showToast(`Jadwal berhasil diperbarui`, 'success');
-            } else {
-                await createSchedule.mutateAsync(form);
-                showToast(`Jadwal berhasil ditambahkan`, 'success');
-            }
+            if (editing) await updateSchedule.mutateAsync({ id: editing.id, data: form });
+            else await createSchedule.mutateAsync(form);
+            showToast(editing ? 'Jadwal berhasil diperbarui' : 'Jadwal berhasil ditambahkan', 'success');
             setModalOpen(false);
-        } catch (error: any) {
-            showToast(error.response?.data?.details ? `Gagal: ${error.response?.data?.details}` : 'Gagal menyimpan jadwal', 'danger');
+        } catch (err) {
+            showToast(errorMessage(err, 'Gagal menyimpan jadwal'), 'danger');
         }
     };
 
@@ -71,10 +51,11 @@ export function JadwalDokter() {
         if (!deleteTarget) return;
         try {
             await deleteSchedule.mutateAsync(deleteTarget.id);
-            showToast(`Jadwal praktek berhasil dihapus`, 'success');
-            setConfirmOpen(false);
-        } catch (error: any) {
-            showToast(error.response?.data?.details ? `Gagal: ${error.response?.data?.details}` : 'Gagal menghapus jadwal', 'danger');
+            showToast('Jadwal praktek berhasil dihapus', 'success');
+        } catch (err) {
+            showToast(errorMessage(err, 'Gagal menghapus jadwal'), 'danger');
+        } finally {
+            setDeleteTarget(null);
         }
     };
 
@@ -92,30 +73,24 @@ export function JadwalDokter() {
         <div className={styles.page}>
             <div className={styles.pageHeader}>
                 <h1 className={styles.pageTitle}>Jadwal Dokter & Poliklinik</h1>
-                <Button variant="primary" onClick={openAdd}>
-                    <Plus size={16} /> Tambah Jadwal
-                </Button>
+                <Button variant="primary" onClick={openAdd}><Plus size={16} /> Tambah Jadwal</Button>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
                 <Card>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ background: 'var(--primary-100)', color: 'var(--primary)', padding: '12px', borderRadius: '12px' }}>
-                            <Users size={24} />
-                        </div>
+                        <div style={{ background: 'var(--primary-100)', color: 'var(--primary)', padding: '12px', borderRadius: '12px' }}><Users size={24} /></div>
                         <div>
-                            <div style={{ fontSize: '24px', fontWeight: 700 }}>{currentList.length}</div>
-                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Total Dokter</div>
+                            <div style={{ fontSize: '24px', fontWeight: 700 }}>{new Set(jadwal.map((j) => j.doctorId)).size}</div>
+                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Dokter Terjadwal</div>
                         </div>
                     </div>
                 </Card>
                 <Card>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ background: 'var(--success-light)', color: 'var(--success)', padding: '12px', borderRadius: '12px' }}>
-                            <Calendar size={24} />
-                        </div>
+                        <div style={{ background: 'var(--success-light)', color: 'var(--success)', padding: '12px', borderRadius: '12px' }}><Calendar size={24} /></div>
                         <div>
-                            <div style={{ fontSize: '24px', fontWeight: 700 }}>{currentList.filter((j: Jadwal) => j.status === 'aktif').length}</div>
+                            <div style={{ fontSize: '24px', fontWeight: 700 }}>{jadwal.filter((j) => j.aktif).length}</div>
                             <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Jadwal Aktif</div>
                         </div>
                     </div>
@@ -131,52 +106,27 @@ export function JadwalDokter() {
             <div className={styles.tableWrapper}>
                 <table className={uiStyles.table}>
                     <thead>
-                        <tr>
-                            <th>Dokter</th>
-                            <th>Poliklinik</th>
-                            <th>Hari Praktek</th>
-                            <th>Jam Praktek</th>
-                            <th>Kuota (JKN / Umum)</th>
-                            <th>Status</th>
-                            <th>Aksi</th>
-                        </tr>
+                        <tr><th>Dokter</th><th>Poliklinik</th><th>Hari Praktek</th><th>Jam Praktek</th><th>Kuota</th><th>Status</th><th>Aksi</th></tr>
                     </thead>
                     <tbody>
                         {filtered.length === 0 ? (
                             <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Tidak ada jadwal ditemukan</td></tr>
-                        ) : filtered.map((jadwal: Jadwal) => (
-                            <tr key={jadwal.id}>
-                                <td>
-                                    <div className={styles.nameCell}>
-                                        <span className={styles.namePrimary}>{jadwal.dokter}</span>
-                                        <span className={styles.nameSecondary}>{jadwal.spesialis}</span>
-                                    </div>
-                                </td>
-                                <td style={{ fontWeight: 500 }}>{jadwal.poli}</td>
-                                <td>{jadwal.hari}</td>
+                        ) : filtered.map((j) => (
+                            <tr key={j.id}>
+                                <td style={{ fontWeight: 500 }}>{j.dokter}</td>
+                                <td>{j.poli}</td>
+                                <td>{j.hari}</td>
                                 <td>
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', background: 'var(--bg)', padding: '4px 8px', borderRadius: '4px' }}>
-                                        <Clock size={12} /> {jadwal.jam}
+                                        <Clock size={12} /> {j.startTime} - {j.endTime}
                                     </span>
                                 </td>
-                                <td>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                        <StatusBadge variant="info" dot={false}>JKN: {jadwal.kuotaJkn}</StatusBadge>
-                                        <StatusBadge variant="neutral" dot={false}>Umum: {jadwal.kuotaUmum}</StatusBadge>
-                                    </div>
-                                </td>
-                                <td>
-                                    <StatusBadge variant={jadwal.status === 'aktif' ? 'success' : 'warning'}>
-                                        {jadwal.status === 'aktif' ? 'Aktif' : 'Cuti/Libur'}
-                                    </StatusBadge>
-                                </td>
+                                <td><StatusBadge variant="info" dot={false}>{j.quota} pasien</StatusBadge></td>
+                                <td><StatusBadge variant={j.aktif ? 'success' : 'warning'}>{j.aktif ? 'Aktif' : 'Cuti/Libur'}</StatusBadge></td>
                                 <td>
                                     <div className={styles.actionBtns}>
-                                        <Button variant="ghost" size="sm" onClick={() => openEdit(jadwal)}><Edit2 size={14} /></Button>
-                                        <Button variant="ghost" size="sm" style={{ color: 'var(--danger)' }}
-                                            onClick={() => { setDeleteTarget(jadwal); setConfirmOpen(true); }}>
-                                            <Trash2 size={14} />
-                                        </Button>
+                                        <Button variant="ghost" size="sm" onClick={() => openEdit(j)}><Edit2 size={14} /></Button>
+                                        <Button variant="ghost" size="sm" style={{ color: 'var(--danger)' }} onClick={() => setDeleteTarget(j)}><Trash2 size={14} /></Button>
                                     </div>
                                 </td>
                             </tr>
@@ -192,54 +142,55 @@ export function JadwalDokter() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                         <div className={uiStyles.formGroup}>
-                            <label className={uiStyles.formLabel}>Nama Dokter *</label>
-                            <select className={uiStyles.formSelect} value={form.dokter} onChange={e => setForm(f => ({ ...f, dokter: e.target.value }))}>
+                            <label className={uiStyles.formLabel}>Dokter *</label>
+                            <select className={uiStyles.formSelect} value={form.doctorId} onChange={(e) => setForm((f) => ({ ...f, doctorId: e.target.value }))}>
                                 <option value="">Pilih Dokter...</option>
-                                {doctorUsers.map((u: any) => (
-                                    <option key={u.id} value={u.id}>{u.nama || u.name}</option>
-                                ))}
+                                {doctors.filter((d) => d.status === 'aktif').map((d) => <option key={d.id} value={d.id}>{d.nama}</option>)}
                             </select>
                         </div>
                         <div className={uiStyles.formGroup}>
-                            <label className={uiStyles.formLabel}>Spesialisasi</label>
-                            <input className={uiStyles.formInput} value={form.spesialis} onChange={e => setForm(f => ({ ...f, spesialis: e.target.value }))} placeholder="Spesialis ..." />
+                            <label className={uiStyles.formLabel}>Poliklinik *</label>
+                            <select className={uiStyles.formSelect} value={form.poliId} onChange={(e) => setForm((f) => ({ ...f, poliId: e.target.value }))}>
+                                <option value="">Pilih Poli...</option>
+                                {POLI_RAWAT_JALAN.map((p) => <option key={p}>{p}</option>)}
+                            </select>
                         </div>
                     </div>
-                    <div className={uiStyles.formGroup}>
-                        <label className={uiStyles.formLabel}>Poliklinik *</label>
-                        <input className={uiStyles.formInput} value={form.poli} onChange={e => setForm(f => ({ ...f, poli: e.target.value }))} placeholder="Poli Umum" />
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
                         <div className={uiStyles.formGroup}>
                             <label className={uiStyles.formLabel}>Hari Praktek *</label>
-                            <select className={uiStyles.formSelect} value={form.hari} onChange={e => setForm(f => ({ ...f, hari: e.target.value }))}>
-                                <option value="">Pilih Hari...</option>
-                                <option>Senin</option><option>Selasa</option><option>Rabu</option>
-                                <option>Kamis</option><option>Jumat</option><option>Sabtu</option>
-                                <option>Minggu</option>
+                            <select className={uiStyles.formSelect} value={form.dayOfWeek} onChange={(e) => setForm((f) => ({ ...f, dayOfWeek: Number(e.target.value) }))}>
+                                {HARI.map((h, i) => <option key={h} value={i}>{h}</option>)}
                             </select>
                         </div>
                         <div className={uiStyles.formGroup}>
-                            <label className={uiStyles.formLabel}>Jam Praktek</label>
-                            <input className={uiStyles.formInput} value={form.jam} onChange={e => setForm(f => ({ ...f, jam: e.target.value }))} placeholder="08:00 - 12:00" />
+                            <label className={uiStyles.formLabel}>Mulai</label>
+                            <input className={uiStyles.formInput} type="time" value={form.startTime} onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))} />
+                        </div>
+                        <div className={uiStyles.formGroup}>
+                            <label className={uiStyles.formLabel}>Selesai</label>
+                            <input className={uiStyles.formInput} type="time" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))} />
                         </div>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                         <div className={uiStyles.formGroup}>
-                            <label className={uiStyles.formLabel}>Kuota JKN</label>
-                            <input className={uiStyles.formInput} type="number" value={form.kuotaJkn} onChange={e => setForm(f => ({ ...f, kuotaJkn: +e.target.value }))} />
+                            <label className={uiStyles.formLabel}>Kuota Pasien</label>
+                            <input className={uiStyles.formInput} type="number" min={0} value={form.quota} onChange={(e) => setForm((f) => ({ ...f, quota: +e.target.value }))} />
                         </div>
                         <div className={uiStyles.formGroup}>
-                            <label className={uiStyles.formLabel}>Kuota Umum</label>
-                            <input className={uiStyles.formInput} type="number" value={form.kuotaUmum} onChange={e => setForm(f => ({ ...f, kuotaUmum: +e.target.value }))} />
+                            <label className={uiStyles.formLabel}>Status</label>
+                            <select className={uiStyles.formSelect} value={form.aktif ? '1' : '0'} onChange={(e) => setForm((f) => ({ ...f, aktif: e.target.value === '1' }))}>
+                                <option value="1">Aktif</option>
+                                <option value="0">Cuti / Libur</option>
+                            </select>
                         </div>
                     </div>
                 </div>
             </Modal>
 
-            <ConfirmDialog open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={handleDelete}
-                title="Hapus Jadwal Dokter?" message={`Jadwal praktek "${deleteTarget?.dokter}" akan dihapus dari sistem.`}
-                variant="danger" confirmLabel={isDeleting ? 'Menghapus...' : 'Ya, Hapus'} />
+            <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete}
+                title="Hapus Jadwal Dokter?" message={`Jadwal praktek "${deleteTarget?.dokter}" (${deleteTarget?.hari}) akan dihapus.`}
+                variant="danger" confirmLabel={deleteSchedule.isPending ? 'Menghapus...' : 'Ya, Hapus'} />
         </div>
     );
 }

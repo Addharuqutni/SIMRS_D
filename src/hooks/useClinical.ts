@@ -1,20 +1,27 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useList, useDetail, useMutate } from '../lib/query';
+import { useListQuery } from '../lib/list-query';
 import { clinicalApi } from '../lib/api/clinical';
 import type { Icd10Code, Icd9Code, VitalSignsRecord, ProgressNote } from '../lib/api/clinical';
+import type { CreateOrderInput } from '../lib/api/penunjang';
 
 // RAWAT JALAN
-export const useRawatJalanList = () => useList('rawat-jalan', clinicalApi.getRawatJalan);
+export const useRawatJalanList = () => useListQuery('rawat-jalan', clinicalApi.listRawatJalan);
+export const useKunjungan = (id: string) => useDetail('rawat-jalan', id, () => clinicalApi.getKunjungan(id));
+export const useRiwayatKunjungan = (id: string) => useDetail('riwayat-kunjungan', id, () => clinicalApi.getRiwayat(id));
 export const useUpdateRawatJalanStatus = () =>
-    useMutate(({ id, status }: { id: string; status: string }) => clinicalApi.updateRawatJalanStatus(id, status), 'rawat-jalan');
+    useMutate(({ id, status }: { id: string; status: string }) => clinicalApi.updateRawatJalanStatus(id, status), 'rawat-jalan', 'visits', 'queues-display');
 
 // EMR SOAP
 export const useEmrSoap = (visitId: string) => useDetail('emr-soap', visitId, () => clinicalApi.getSoap(visitId));
 export const useSaveEmrSoap = () => useMutate(clinicalApi.saveSoap, 'emr-soap');
-export const useCreatePrescription = () => useMutation({ mutationFn: clinicalApi.createPrescription });
 export const useSignERecipe = () => useMutation({ mutationFn: (prescriptionId: string) => clinicalApi.signERecipe(prescriptionId) });
+/** EMR order entry — invalidates both unit worklists so the order shows up there. */
 export const useCreateOrder = () =>
-    useMutation({ mutationFn: (vars: { type: 'lab' | 'radiology'; data: any }) => clinicalApi.createOrder(vars.type, vars.data) });
+    useMutate(
+        (vars: { type: 'lab' | 'radiology'; data: CreateOrderInput }) => clinicalApi.createOrder(vars.type, vars.data),
+        'lab-orders', 'rad-orders', 'billings',
+    );
 
 // VITAL SIGNS + MEWS — list (timeline) and create
 export const useVitalSigns = (visitId: string) =>
@@ -66,7 +73,7 @@ export const useIcd9Search = (q: string) =>
 export const useClinicalMedicines = () => useList('clinical-medicines', clinicalApi.getClinicalMedicines);
 
 // RAWAT INAP
-export const useRawatInapList = () => useList('rawat-inap', clinicalApi.getRawatInap);
-export const useCreateRawatInapAdmisi = () => useMutate(clinicalApi.createAdmisiInap, 'rawat-inap');
+export const useRawatInapList = () => useListQuery('rawat-inap', clinicalApi.listRawatInap);
+export const useCreateRawatInapAdmisi = () => useMutate(clinicalApi.createAdmisiInap, 'rawat-inap', 'visits');
 export const useUpdateRawatInapStatus = () =>
-    useMutate(({ id, status }: { id: string; status: string }) => clinicalApi.updateRawatInapStatus(id, status), 'rawat-inap');
+    useMutate(({ id, status }: { id: string; status: string }) => clinicalApi.updateRawatInapStatus(id, status), 'rawat-inap', 'billings');

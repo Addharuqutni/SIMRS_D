@@ -2,146 +2,82 @@ import { Router } from 'express';
 import { db } from '../../db';
 import { patients, visits } from '../../db/schemas/patient';
 import { users } from '../../db/schemas/auth';
-import { eq, max, and, gte, lt, isNull, ilike, or } from 'drizzle-orm';
-import { requireAuth, requireRole } from '../../middleware/auth';
 import { queues } from '../../db/schemas/schedule';
+import { and, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
+import { requireAuth, requireRole } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../middleware/error';
-import { ROLE_GROUPS } from '../../utils/roles';
-import { createPatientSchema, createVisitSchema, patientRmParamSchema, updatePatientSchema, visitIdParamSchema } from './schema';
+import type { Capability } from '../../../../shared/access';
+import { countsByStatus, readPageParams, toPage } from '../../utils/pagination';
+import { admit, transitionKunjungan, type AdmitInput } from '../admission/admission';
+import { admitRawatJalanSchema } from '../admission/schema';
+import { patientRmParamSchema, updatePatientSchema, visitIdParamSchema } from './schema';
 
 const router = Router();
 
-const patientReadRoles = [...ROLE_GROUPS.registration, ...ROLE_GROUPS.clinical, ...ROLE_GROUPS.billing, ...ROLE_GROUPS.pharmacy, ...ROLE_GROUPS.lab];
-const patientWriteRoles = ROLE_GROUPS.registration;
+const patientReadRoles: Capability[] = ['registration', 'clinical', 'billing', 'pharmacy', 'lab'];
+const patientWriteRoles: Capability[] = ['registration'];
 
-// GET all visits (registrations) — keep before /:rm
+// GET registrations (all Kunjungan types) — paginated, per-status counts; ?jaminan= filters. Keep before /:rm
 router.get('/visits/all', requireAuth, requireRole(...patientReadRoles), asyncHandler(async (req, res) => {
-    const data = await db.select({
-        id: visits.id,
-        nama: patients.nama,
-        nik: patients.nik,
-        jaminan: visits.jaminan,
-        poli: visits.poliId,
-        dokter: users.name,
-        status: visits.status,
-        waktu: visits.waktuDaftar,
-        rm: patients.rm,
-        tipe: visits.tipeKunjungan
-    })
-        .from(visits)
-        .leftJoin(patients, eq(visits.patientId, patients.id))
-        .leftJoin(users, eq(visits.dokterId, users.id));
+    const p = readPageParams(req);
+    const jaminan = typeof req.query.jaminan === 'string' && req.query.jaminan ? req.query.jaminan : undefined;
+    const filter = and(
+        p.q ? or(ilike(patients.nama, `%${p.q}%`), ilike(patients.rm, `%${p.q}%`), ilike(patients.nik, `%${p.q}%`)) : undefined,
+        jaminan ? eq(visits.jaminan, jaminan) : undefined,
+    );
 
-    res.json(data);
+    const [rows, statusRows] = await Promise.all([
+        db.select({
+            id: visits.id,
+            patientId: patients.id,
+            nama: patients.nama,
+            nik: patients.nik,
+            jaminan: visits.jaminan,
+            poli: visits.poliId,
+            dokter: users.name,
+            status: visits.status,
+            waktu: visits.waktuDaftar,
+            rm: patients.rm,
+            tipe: visits.tipeKunjungan,
+            queueCode: queues.queueCode,
+        })
+            .from(visits)
+            .leftJoin(patients, eq(visits.patientId, patients.id))
+            .leftJoin(users, eq(visits.dokterId, users.id))
+            .leftJoin(queues, eq(queues.visitId, visits.id))
+            .where(and(filter, p.status ? eq(visits.status, p.status) : undefined))
+            .orderBy(desc(visits.waktuDaftar))
+            .limit(p.limit).offset(p.offset),
+        db.select({ status: visits.status, n: count() }).from(visits)
+            .leftJoin(patients, eq(visits.patientId, patients.id))
+            .where(filter).groupBy(visits.status),
+    ]);
+    const counts = countsByStatus(statusRows);
+    const total = p.status ? (counts[p.status] ?? 0) : Object.values(counts).reduce((a, b) => a + b, 0);
+    res.json(toPage(rows, total, p, counts));
 }));
 
-// POST new visit (registration)
-router.post('/visits', requireAuth, requireRole(...patientWriteRoles), validate(createVisitSchema), asyncHandler(async (req, res) => {
-    const body = req.body;
-    const visit = await db.transaction(async (tx) => {
-        const newVisit = await tx.insert(visits).values({
-            id: body.id || `VIS-${Date.now()}`,
-            patientId: body.patientId,
-            poliId: body.poliId,
-            dokterId: body.dokterId,
-            jaminan: body.jaminan,
-            status: body.status || 'menunggu',
-            tipeKunjungan: body.tipeKunjungan,
-        }).returning();
-
-        const createdVisit = newVisit[0];
-
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
-
-        const poliPrefixes: Record<string, string> = {
-            'Poli Umum': 'A',
-            'Poli Gigi': 'B',
-            'Poli Anak': 'C',
-            'Poli Kandungan': 'D',
-            'IGD': 'E'
-        };
-        const queueCode = poliPrefixes[createdVisit.poliId] || 'P';
-
-        const queueStats = await tx.select({ maxNum: max(queues.queueNumber) })
-            .from(queues)
-            .where(
-                and(
-                    eq(queues.poliId, createdVisit.poliId),
-                    gte(queues.createdAt, startOfDay),
-                    lt(queues.createdAt, endOfDay)
-                )
-            );
-        const nextNumber = (queueStats[0]?.maxNum || 0) + 1;
-
-        await tx.insert(queues).values({
-            visitId: createdVisit.id,
-            poliId: createdVisit.poliId,
-            loket: createdVisit.poliId,
-            queueNumber: nextNumber,
-            queueCode: `${queueCode}-${String(nextNumber).padStart(3, '0')}`,
-            status: 'menunggu'
-        });
-
-        return createdVisit;
-    });
-
-    // Fetch the queue row after the transaction commits so the response can print a ticket.
-    const queueRow = await db.select({ queueCode: queues.queueCode, loket: queues.loket })
-        .from(queues)
-        .where(eq(queues.visitId, visit.id))
-        .limit(1);
-
-    res.status(201).json({ ...visit, queueCode: queueRow[0]?.queueCode ?? null, loket: queueRow[0]?.loket ?? null });
+// POST registration (rawat jalan) — patient (new or existing) + visit + Antrean ticket + konsultasi charge
+router.post('/visits', requireAuth, requireRole(...patientWriteRoles), validate(admitRawatJalanSchema), asyncHandler(async (req, res) => {
+    const r = await admit(db, { jenis: 'rawat_jalan', ...req.body } as AdmitInput);
+    res.status(201).json({ ...r.visit, rm: r.patient.rm, nama: r.patient.nama, queueCode: r.queue.queueCode, loket: r.queue.loket });
 }));
 
-// DELETE visit (registration) soft delete
+// DELETE registration → Kunjungan batal (queue ticket cancelled too)
 router.delete('/visits/:id', requireAuth, requireRole(...patientWriteRoles), validate(visitIdParamSchema), asyncHandler(async (req, res) => {
-    await db.update(visits).set({ status: 'batal' }).where(eq(visits.id, req.params.id));
-    res.json({ success: true, message: 'Visit cancelled successfully' });
+    await transitionKunjungan(db, req.params.id, 'batal');
+    res.json({ success: true });
 }));
 
-// GET all patients — optional ?q= searches ilike across nama OR rm OR nik.
-// Without q the full (non-deleted) list is returned, unchanged.
+// GET patients — optional ?q= searches nama / rm / nik; capped at 50 rows (picker use)
 router.get('/', requireAuth, requireRole(...patientReadRoles), asyncHandler(async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-    const where = q
-        ? and(
-            isNull(patients.deletedAt),
-            or(
-                ilike(patients.nama, `%${q}%`),
-                ilike(patients.rm, `%${q}%`),
-                ilike(patients.nik, `%${q}%`),
-            ),
-        )
-        : isNull(patients.deletedAt);
-
-    const allPatients = await db.select().from(patients).where(where);
-    res.json(allPatients);
-}));
-
-// POST new patient
-router.post('/', requireAuth, requireRole(...patientWriteRoles), validate(createPatientSchema), asyncHandler(async (req, res) => {
-    const body = req.body;
-    const newPatient = await db.insert(patients).values({
-        id: body.id || `PAT-${Date.now()}`,
-        rm: body.rm,
-        nik: body.nik,
-        nama: body.nama,
-        tempatLahir: body.tempatLahir,
-        tanggalLahir: body.tanggalLahir,
-        gender: body.gender,
-        goldar: body.goldar,
-        agama: body.agama,
-        alamat: body.alamat,
-        telepon: body.telepon,
-        pekerjaan: body.pekerjaan,
-        alergi: body.alergi,
-    }).returning();
-    res.status(201).json(newPatient[0]);
+    const where = and(
+        isNull(patients.deletedAt),
+        q ? or(ilike(patients.nama, `%${q}%`), ilike(patients.rm, `%${q}%`), ilike(patients.nik, `%${q}%`)) : undefined,
+    );
+    res.json(await db.select().from(patients).where(where).orderBy(desc(patients.createdAt)).limit(50));
 }));
 
 // GET patient by RM
@@ -153,21 +89,7 @@ router.get('/:rm', requireAuth, requireRole(...patientReadRoles), validate(patie
 
 // PUT update patient by RM
 router.put('/:rm', requireAuth, requireRole(...patientWriteRoles), validate(updatePatientSchema), asyncHandler(async (req, res) => {
-    const body = req.body;
-    await db.update(patients).set({
-        nik: body.nik,
-        nama: body.nama,
-        tempatLahir: body.tempatLahir,
-        tanggalLahir: body.tanggalLahir,
-        gender: body.gender,
-        goldar: body.goldar,
-        agama: body.agama,
-        alamat: body.alamat,
-        telepon: body.telepon,
-        pekerjaan: body.pekerjaan,
-        alergi: body.alergi,
-        updatedAt: new Date()
-    }).where(eq(patients.rm, req.params.rm));
+    await db.update(patients).set({ ...req.body, updatedAt: new Date() }).where(eq(patients.rm, req.params.rm));
     res.json({ success: true });
 }));
 

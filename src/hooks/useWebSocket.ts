@@ -1,27 +1,26 @@
 /**
  * Native browser WebSocket hook for real-time queue updates.
  *
- * Connects to the SIMRS backend WebSocket at ws://host:port/ws and
- * parses `queue:update` / `queue:called` events into TanStack Query
- * invalidations — so the display board and antrean page refresh
- * instantly without manual polling.
- *
- * No external library needed — uses the standard WebSocket API.
- * Reconnects automatically after a short backoff if the socket drops.
+ * Connects to the SIMRS backend at ws(s)://<api host>/ws. Every server message
+ * is `{ type, data, timestamp }` (see server/src/utils/websocket.ts).
+ * Reconnects with exponential backoff (1s → 10s) after a drop.
  */
 import { useEffect, useRef, useState } from 'react';
 
 export type QueueEvent =
-    | { type: 'queue:update'; poli: string; data: Record<string, unknown> }
-    | { type: 'queue:called'; poli: string; code: string; loket?: string }
-    | { type: 'connected' };
+    | { type: 'queue:update'; data: { poli: string; data: Record<string, unknown> }; timestamp: string }
+    | { type: 'queue:called'; data: { poli: string; code: string; loket?: string }; timestamp: string }
+    | { type: 'connected'; data: { message: string }; timestamp: string };
 
 function buildWsUrl(): string {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Backend runs on 3000; Vite dev proxy can also forward /ws
-    const host = import.meta.env.DEV ? `${window.location.hostname}:3000` : window.location.host;
-    return `${proto}//${host}/ws`;
+    const api = new URL(import.meta.env.VITE_API_URL || 'http://localhost:3000', window.location.href);
+    api.protocol = api.protocol === 'https:' ? 'wss:' : 'ws:';
+    api.pathname = '/ws';
+    return api.toString();
 }
+
+const MIN_BACKOFF_MS = 1000;
+const MAX_BACKOFF_MS = 10_000;
 
 export function useQueueSocket() {
     const [lastEvent, setLastEvent] = useState<QueueEvent | null>(null);
@@ -31,21 +30,21 @@ export function useQueueSocket() {
 
     useEffect(() => {
         let cancelled = false;
+        let backoff = MIN_BACKOFF_MS;
 
         const connect = () => {
-            const url = buildWsUrl();
-            const ws = new WebSocket(url);
+            const ws = new WebSocket(buildWsUrl());
             wsRef.current = ws;
 
             ws.onopen = () => {
                 if (cancelled) return;
+                backoff = MIN_BACKOFF_MS;
                 setConnected(true);
             };
 
             ws.onmessage = (ev) => {
                 try {
-                    const parsed = JSON.parse(ev.data);
-                    setLastEvent(parsed as QueueEvent);
+                    setLastEvent(JSON.parse(ev.data) as QueueEvent);
                 } catch {
                     /* ignore malformed */
                 }
@@ -54,14 +53,11 @@ export function useQueueSocket() {
             ws.onclose = () => {
                 if (cancelled) return;
                 setConnected(false);
-                // Exponential-ish backoff capped at 10s
-                reconnectTimer.current = window.setTimeout(connect, 3000);
+                reconnectTimer.current = window.setTimeout(connect, backoff);
+                backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
             };
 
-            ws.onerror = () => {
-                // onclose will fire next; let the reconnect timer handle it
-                ws.close();
-            };
+            ws.onerror = () => ws.close();
         };
 
         connect();

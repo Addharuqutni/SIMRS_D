@@ -1,32 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Search, FolderHeart, Clock, User, Phone, MapPin, ArrowLeft } from 'lucide-react';
-import { Button, StatusBadge, Card, Modal, showToast } from '../../components/ui';
+import { Button, StatusBadge, Card, Modal, showToast, LifecycleBadge } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
-import { api } from '../../lib/axios';
 import { useDetail } from '../../lib/query';
-import { useVisits } from '../../hooks/usePatient';
+import { usePatientSearch, useVisitList } from '../../hooks/usePatient';
 import { clinicalApi, type EmrSoap } from '../../lib/api/clinical';
-import type { Patient, VisitWithPatient } from '../../lib/api/patient';
+import type { Patient } from '../../lib/api/patient';
 import styles from '../registrasi/registrasi.module.css';
 
-// /patients/visits/all also returns `tipe` (visits.tipeKunjungan)
-interface VisitRow extends VisitWithPatient {
-    tipe?: string | null;
-}
-
-type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
-
-const tipeMap: Record<string, { label: string; variant: BadgeVariant }> = {
-    rawat_jalan: { label: 'Rawat Jalan', variant: 'success' },
-    igd: { label: 'IGD', variant: 'danger' },
-    rawat_inap: { label: 'Rawat Inap', variant: 'info' },
-};
-
-const visitStatusMap: Record<string, { label: string; variant: BadgeVariant }> = {
-    menunggu: { label: 'Menunggu', variant: 'warning' },
-    pemeriksaan: { label: 'Pemeriksaan', variant: 'info' },
-    selesai: { label: 'Selesai', variant: 'success' },
-    batal: { label: 'Batal', variant: 'danger' },
+const TIPE_LABEL: Record<string, string> = {
+    rawat_jalan: 'Rawat Jalan',
+    igd: 'IGD',
+    rawat_inap: 'Rawat Inap',
 };
 
 const fmtDate = (iso: string) =>
@@ -39,53 +24,40 @@ const genderLabel = (g?: string | null) =>
     g === 'L' ? 'Laki-laki' : g === 'P' ? 'Perempuan' : (g || '-');
 
 export function RekamMedis() {
-    const [searchRm, setSearchRm] = useState('');
-    const [searching, setSearching] = useState(false);
-    const [results, setResults] = useState<Patient[] | null>(null);
+    const [query, setQuery] = useState('');
     const [selected, setSelected] = useState<Patient | null>(null);
-    const [selectedVisit, setSelectedVisit] = useState<VisitRow | null>(null);
+    const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
 
-    const { data: allVisits, isLoading: visitsLoading } = useVisits();
+    // Patient search (fires from 2 characters, server-side match on RM / NIK / nama)
+    const { data: found = [], isFetching: searching } = usePatientSearch(query);
 
-    // Visit history of the selected patient (matched by RM — the visits rows carry rm, not patientId)
-    const history = ((allVisits as VisitRow[] | undefined) ?? [])
-        .filter((v) => selected && v.rm === selected.rm)
-        .sort((a, b) => new Date(b.waktu).getTime() - new Date(a.waktu).getTime());
+    // Visit history of the selected patient — queried server-side by RM so it
+    // covers all pages (the history may be longer than one list page).
+    const history = useVisitList();
+    const { search: historySearch, setSearch: setHistorySearch } = history;
+    const desiredRmSearch = selected?.rm ?? '';
+    useEffect(() => {
+        // Guarded so re-runs can never reset the page back to 1.
+        if (historySearch !== desiredRmSearch) setHistorySearch(desiredRmSearch);
+    }, [desiredRmSearch, historySearch, setHistorySearch]);
+
+    const selectedVisit = history.rows.find((v) => v.id === selectedVisitId) ?? null;
 
     // EMR SOAP of the visit opened in the detail modal
     const { data: soap, isLoading: soapLoading, isError: soapError } = useDetail<EmrSoap | null>(
         'soap',
-        selectedVisit?.id ?? '',
-        () => clinicalApi.getSoap(selectedVisit!.id)
+        selectedVisitId ?? '',
+        () => clinicalApi.getSoap(selectedVisitId!)
     );
 
-    const handleSearch = async () => {
-        const q = searchRm.trim();
-        if (!q) {
-            showToast('Masukkan nomor RM, NIK, atau nama pasien', 'warning');
+    const handleSearch = () => {
+        const q = query.trim();
+        if (q.length < 2) {
+            showToast('Masukkan minimal 2 karakter nomor RM, NIK, atau nama pasien', 'warning');
             return;
         }
-        setSearching(true);
-        try {
-            const res = await api.get<Patient[]>('/patients', { params: { q } });
-            const found = Array.isArray(res.data) ? res.data : [];
-            setResults(found);
-            setSelectedVisit(null);
-            if (found.length === 0) {
-                setSelected(null);
-                showToast(`Tidak ditemukan pasien dengan "${q}"`, 'warning');
-            } else if (found.length === 1) {
-                setSelected(found[0]);
-                showToast(`Berkas rekam medis ditemukan untuk RM: ${found[0].rm}`, 'success');
-            } else {
-                setSelected(null);
-                showToast(`${found.length} pasien cocok — pilih salah satu`, 'info');
-            }
-        } catch {
-            showToast('Pencarian gagal, coba lagi', 'danger');
-        } finally {
-            setSearching(false);
-        }
+        setSelected(null);
+        setSelectedVisitId(null);
     };
 
     const p = selected;
@@ -101,8 +73,8 @@ export function RekamMedis() {
                     className={uiStyles.formInput}
                     style={{ flex: 1 }}
                     placeholder="Cari No. RM / NIK / Nama Lengkap..."
-                    value={searchRm}
-                    onChange={(e) => setSearchRm(e.target.value)}
+                    value={query}
+                    onChange={(e) => { setQuery(e.target.value); setSelected(null); setSelectedVisitId(null); }}
                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 />
                 <Button variant="primary" onClick={handleSearch} disabled={searching}>
@@ -110,53 +82,55 @@ export function RekamMedis() {
                 </Button>
             </div>
 
-            {/* Multiple matches: pick one patient first */}
-            {results !== null && results.length > 0 && !p && (
+            {/* Matching patients: pick one to open the medical record */}
+            {!p && query.trim().length >= 2 && (
                 <div style={{ marginBottom: '24px', animation: 'fadeIn 0.3s ease' }}>
-                    <table className={uiStyles.table}>
-                        <thead>
-                            <tr>
-                                <th>Nama Pasien</th>
-                                <th>No. RM</th>
-                                <th>NIK</th>
-                                <th>Telepon</th>
-                                <th>Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {results.map((r) => (
-                                <tr key={r.id}>
-                                    <td style={{ fontWeight: 600, color: 'var(--text)' }}>{r.nama}</td>
-                                    <td style={{ fontFamily: 'var(--font-mono)' }}>{r.rm}</td>
-                                    <td>{r.nik || '-'}</td>
-                                    <td>{r.telepon || '-'}</td>
-                                    <td>
-                                        <Button variant="ghost" size="sm" onClick={() => { setSelected(r); setSelectedVisit(null); }}>
-                                            <FolderHeart size={14} /> Pilih
-                                        </Button>
-                                    </td>
+                    {searching ? (
+                        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                            Mencari berkas pasien...
+                        </div>
+                    ) : found.length === 0 ? (
+                        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                            Tidak ada pasien yang cocok dengan pencarian.
+                        </div>
+                    ) : (
+                        <table className={uiStyles.table}>
+                            <thead>
+                                <tr>
+                                    <th>Nama Pasien</th>
+                                    <th>No. RM</th>
+                                    <th>NIK</th>
+                                    <th>Telepon</th>
+                                    <th>Aksi</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-
-            {results !== null && results.length === 0 && (
-                <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '24px' }}>
-                    Tidak ada pasien yang cocok dengan pencarian.
+                            </thead>
+                            <tbody>
+                                {found.map((r) => (
+                                    <tr key={r.id}>
+                                        <td style={{ fontWeight: 600, color: 'var(--text)' }}>{r.nama}</td>
+                                        <td style={{ fontFamily: 'var(--font-mono)' }}>{r.rm}</td>
+                                        <td>{r.nik || '-'}</td>
+                                        <td>{r.telepon || '-'}</td>
+                                        <td>
+                                            <Button variant="ghost" size="sm" onClick={() => { setSelected(r); setSelectedVisitId(null); }}>
+                                                <FolderHeart size={14} /> Pilih
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
                 </div>
             )}
 
             {p && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {results && results.length > 1 && (
-                        <div>
-                            <Button variant="secondary" size="sm" onClick={() => setSelected(null)}>
-                                <ArrowLeft size={14} /> Kembali ke hasil pencarian
-                            </Button>
-                        </div>
-                    )}
+                    <div>
+                        <Button variant="secondary" size="sm" onClick={() => { setSelected(null); setSelectedVisitId(null); }}>
+                            <ArrowLeft size={14} /> Kembali ke hasil pencarian
+                        </Button>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '20px', animation: 'fadeIn 0.3s ease' }}>
                         {/* Identitas Pasien */}
                         <Card title="Identitas Pasien" icon={<User size={18} />}>
@@ -193,8 +167,8 @@ export function RekamMedis() {
                         {/* Riwayat Kunjungan */}
                         <Card title="Riwayat Kunjungan & Tindakan" icon={<Clock size={18} />}>
                             <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
-                                <StatusBadge variant="info">Total: {history.length} Kunjungan</StatusBadge>
-                                <StatusBadge variant="warning">Terakhir: {history[0] ? fmtDate(history[0].waktu) : '-'}</StatusBadge>
+                                <StatusBadge variant="info">Total: {history.paginationProps.totalItems} Kunjungan</StatusBadge>
+                                <StatusBadge variant="warning">Terakhir: {history.rows[0] ? fmtDate(history.rows[0].waktu) : '-'}</StatusBadge>
                             </div>
 
                             <table className={uiStyles.table}>
@@ -209,35 +183,49 @@ export function RekamMedis() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {visitsLoading ? (
+                                    {history.isLoading ? (
                                         <tr><td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>Memuat riwayat kunjungan...</td></tr>
-                                    ) : history.length === 0 ? (
+                                    ) : history.isError ? (
+                                        <tr><td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: 'var(--danger)' }}>Gagal memuat riwayat kunjungan. Coba lagi.</td></tr>
+                                    ) : history.rows.length === 0 ? (
                                         <tr><td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>Belum ada kunjungan tercatat untuk pasien ini</td></tr>
-                                    ) : history.map((h) => {
-                                        const tipe = h.tipe ? tipeMap[h.tipe] ?? { label: h.tipe, variant: 'neutral' as BadgeVariant } : null;
-                                        const st = visitStatusMap[h.status] ?? { label: h.status, variant: 'neutral' as BadgeVariant };
-                                        return (
-                                            <tr key={h.id}>
-                                                <td style={{ fontWeight: 600, color: 'var(--text)' }}>{fmtDate(h.waktu)}</td>
-                                                <td>
-                                                    <StatusBadge variant={tipe ? tipe.variant : 'neutral'} dot={false}>
-                                                        {tipe ? tipe.label : h.jaminan}
-                                                    </StatusBadge>
-                                                </td>
-                                                <td>{h.poli}</td>
-                                                <td>{h.dokter || '-'}</td>
-                                                <td><StatusBadge variant={st.variant}>{st.label}</StatusBadge></td>
-                                                <td>
-                                                    <Button variant="ghost" size="sm" title="Buka Detail EMR"
-                                                        onClick={() => setSelectedVisit(h)}>
-                                                        <FolderHeart size={14} /> Buka
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                    ) : history.rows.map((h) => (
+                                        <tr key={h.id}>
+                                            <td style={{ fontWeight: 600, color: 'var(--text)' }}>{fmtDate(h.waktu)}</td>
+                                            <td>
+                                                <StatusBadge variant={h.tipe === 'igd' ? 'danger' : h.tipe === 'rawat_inap' ? 'info' : 'success'} dot={false}>
+                                                    {TIPE_LABEL[h.tipe] ?? h.tipe}
+                                                </StatusBadge>
+                                            </td>
+                                            <td>{h.poli}</td>
+                                            <td>{h.dokter || '-'}</td>
+                                            <td><LifecycleBadge kind="kunjungan" status={h.status} /></td>
+                                            <td>
+                                                <Button variant="ghost" size="sm" title="Buka Detail EMR"
+                                                    onClick={() => setSelectedVisitId(h.id)}>
+                                                    <FolderHeart size={14} /> Buka
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
+
+                            {history.paginationProps.totalPages > 1 && (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                    <span>Halaman {history.paginationProps.currentPage} dari {history.paginationProps.totalPages}</span>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <Button variant="secondary" size="sm" disabled={history.paginationProps.currentPage <= 1}
+                                            onClick={() => history.paginationProps.onPageChange(history.paginationProps.currentPage - 1)}>
+                                            Sebelumnya
+                                        </Button>
+                                        <Button variant="secondary" size="sm" disabled={history.paginationProps.currentPage >= history.paginationProps.totalPages}
+                                            onClick={() => history.paginationProps.onPageChange(history.paginationProps.currentPage + 1)}>
+                                            Berikutnya
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
                         </Card>
                     </div>
                 </div>
@@ -246,7 +234,7 @@ export function RekamMedis() {
             {/* EMR Detail Modal */}
             <Modal
                 open={!!selectedVisit}
-                onClose={() => setSelectedVisit(null)}
+                onClose={() => setSelectedVisitId(null)}
                 title={`Detail EMR — ${selectedVisit ? fmtDate(selectedVisit.waktu) : ''}`}
                 icon={<FolderHeart size={20} />}
                 size="lg"

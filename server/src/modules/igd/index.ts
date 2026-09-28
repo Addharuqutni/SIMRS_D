@@ -3,137 +3,66 @@ import { db } from '../../db';
 import { igdTriase } from '../../db/schemas/clinical';
 import { visits, patients } from '../../db/schemas/patient';
 import { users } from '../../db/schemas/auth';
-import { notifications } from '../../db/schemas/notify';
-import { eq, desc } from 'drizzle-orm';
-import { requireAuth } from '../../middleware/auth';
+import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
+import { requireAuth, requireRole } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/error';
-import { computeMews, mewsActionFor } from '../../utils/mews';
-import { z } from 'zod';
+import { validate } from '../../middleware/validate';
+import { mewsActionFor } from '../../utils/mews';
+import { countsByStatus, readPageParams, toPage } from '../../utils/pagination';
+import { admit, transitionKunjungan, type AdmitInput } from '../admission/admission';
+import { admitIgdSchema, statusSchema } from '../admission/schema';
 
 const router = Router();
 
-// GET all active IGD visits
-router.get('/', requireAuth, asyncHandler(async (req, res) => {
-    const data = await db.select({
-        rm: patients.rm,
-        pasien: patients.nama,
-        triase: igdTriase.triase,
-        keluhanUtama: igdTriase.keluhanUtama,
-        masuk: visits.waktuDaftar,
-        diagnosaAwal: igdTriase.keluhanUtama, // matching frontend expectations initially
-        dokter: users.name,
-        status: visits.status,
-        visitId: visits.id,
-        // Include critical MEWS + allergy for safety banner on the list
-        mewsScore: igdTriase.mewsScore,
-        alergi: patients.alergi,
-        patientId: patients.id,
-    }).from(visits)
-        .leftJoin(patients, eq(visits.patientId, patients.id))
-        .leftJoin(users, eq(visits.dokterId, users.id))
-        .leftJoin(igdTriase, eq(visits.id, igdTriase.visitId))
-        .where(eq(visits.poliId, 'IGD')) // assuming 'IGD' represents the poliId for emergency room
-        .orderBy(desc(visits.waktuDaftar));
+// GET IGD visits — paginated, per-status counts
+router.get('/', requireAuth, requireRole('clinical'), asyncHandler(async (req, res) => {
+    const p = readPageParams(req);
+    const search = p.q ? or(ilike(patients.nama, `%${p.q}%`), ilike(patients.rm, `%${p.q}%`)) : undefined;
+    const isIgd = eq(visits.tipeKunjungan, 'igd');
 
-    // Attach computed MEWS level/action for client convenience
-    const enriched = data.map(r => ({
+    const [rows, statusRows] = await Promise.all([
+        db.select({
+            rm: patients.rm,
+            pasien: patients.nama,
+            triase: igdTriase.triase,
+            keluhanUtama: igdTriase.keluhanUtama,
+            masuk: visits.waktuDaftar,
+            dokter: users.name,
+            status: visits.status,
+            visitId: visits.id,
+            mewsScore: igdTriase.mewsScore,
+            alergi: patients.alergi,
+            patientId: patients.id,
+        }).from(visits)
+            .leftJoin(patients, eq(visits.patientId, patients.id))
+            .leftJoin(users, eq(visits.dokterId, users.id))
+            .leftJoin(igdTriase, eq(visits.id, igdTriase.visitId))
+            .where(and(isIgd, search, p.status ? eq(visits.status, p.status) : undefined))
+            .orderBy(desc(visits.waktuDaftar))
+            .limit(p.limit).offset(p.offset),
+        db.select({ status: visits.status, n: count() }).from(visits)
+            .leftJoin(patients, eq(visits.patientId, patients.id))
+            .where(and(isIgd, search)).groupBy(visits.status),
+    ]);
+
+    const counts = countsByStatus(statusRows);
+    const total = p.status ? (counts[p.status] ?? 0) : Object.values(counts).reduce((a, b) => a + b, 0);
+    res.json(toPage(rows.map((r) => ({
         ...r,
         mews: mewsActionFor(r.mewsScore ?? 0),
         hasAllergy: !!(r.alergi && r.alergi.trim() && r.alergi.trim().toLowerCase() !== 'tidak ada'),
-    }));
-
-    res.json(enriched);
+    })), total, p, counts));
 }));
 
-// Zod schema for IGD admission with structured vital signs + MEWS
-const admisiSchema = z.object({
-    body: z.object({
-        pasien: z.string().min(1, 'Nama pasien wajib diisi'),
-        triase: z.enum(['merah', 'kuning', 'hijau', 'hitam']),
-        diagnosaAwal: z.string().min(1, 'Keluhan utama wajib diisi'),
-        dokter: z.string().min(1, 'Dokter wajib dipilih'),
-        // Structured vital signs (all optional — triage may be rapid)
-        sistolik: z.number().int().min(40).max(300).optional(),
-        diastolik: z.number().int().min(20).max(200).optional(),
-        nadi: z.number().int().min(20).max(250).optional(),
-        suhu: z.number().min(30).max(45).optional(),
-        pernapasan: z.number().int().min(5).max(60).optional(),
-        spo2: z.number().int().min(50).max(100).optional(),
-        kesadaran: z.string().optional(),
-    }),
-});
-
-// POST new IGD admission (creates patient, visit, and triase with MEWS)
-router.post('/admisi', requireAuth, asyncHandler(async (req, res) => {
-    const validated = admisiSchema.parse(req);
-    const { pasien, triase, diagnosaAwal, dokter, ...vitals } = validated.body;
-
-    let generatedRM = `RM${Math.floor(100000 + Math.random() * 900000)}`;
-
-    const newPatient = await db.insert(patients).values({
-        id: `PAT-${Date.now()}`,
-        rm: generatedRM,
-        nama: pasien,
-        gender: 'L', // default placeholder
-        alamat: 'Darurat IGD'
-    }).returning();
-
-    const newVisit = await db.insert(visits).values({
-        id: `VST-${Date.now()}`,
-        patientId: newPatient[0].id,
-        poliId: 'IGD',
-        dokterId: dokter,
-        jaminan: 'Umum / Mandiri',
-        tipeKunjungan: 'igd',
-        status: 'menunggu'
-    }).returning();
-
-    // Compute MEWS from the vital signs captured at triage
-    const mews = computeMews({
-        sistolik: vitals.sistolik,
-        diastolik: vitals.diastolik,
-        nadi: vitals.nadi,
-        suhu: vitals.suhu,
-        pernapasan: vitals.pernapasan,
-        spo2: vitals.spo2,
-    });
-
-    const newTriase = await db.insert(igdTriase).values({
-        id: `TRS-${Date.now()}`,
-        visitId: newVisit[0].id,
-        triase,
-        keluhanUtama: diagnosaAwal,
-        // Structured numeric vital signs (was varchar — now supports trending)
-        sistolik: vitals.sistolik,
-        diastolik: vitals.diastolik,
-        nadi: vitals.nadi,
-        suhu: vitals.suhu,
-        pernapasan: vitals.pernapasan,
-        spo2: vitals.spo2,
-        kesadaran: vitals.kesadaran,
-        mewsScore: mews.score,
-    }).returning();
-
-    // Escalation: notify treating doctor immediately if MEWS >= 3
-    if (mews.score >= 3) {
-        await db.insert(notifications).values({
-            userId: dokter,
-            title: `⚠️ MEWS ${mews.score} — Pasien IGD Kritis`,
-            message: `Pasien ${pasien} (Triase ${triase.toUpperCase()}) menunjukkan tanda deteriorasi. ${mews.action}`,
-            type: mews.level === 'danger' ? 'error' : 'warning',
-            linkUrl: '/igd',
-        });
-    }
-
-    res.status(201).json({ success: true, visitId: newVisit[0].id, mewsScore: mews.score, mews });
+// POST IGD admission — patient (new or existing), visit, queue, triase + MEWS, IGD charge
+router.post('/admisi', requireAuth, requireRole('clinical'), validate(admitIgdSchema), asyncHandler(async (req, res) => {
+    const r = await admit(db, { jenis: 'igd', ...req.body } as AdmitInput);
+    res.status(201).json({ visitId: r.visit.id, rm: r.patient.rm, queueCode: r.queue.queueCode, mewsScore: r.mews?.score, mews: r.mews });
 }));
 
-// PUT update status tindakan
-router.put('/tindakan/:visitId', requireAuth, asyncHandler(async (req, res) => {
-    await db.update(visits)
-        .set({ status: req.body.status })
-        .where(eq(visits.id, req.params.visitId));
-    res.json({ success: true });
+// PUT IGD Kunjungan status (menunggu → tindakan → observasi → selesai)
+router.put('/tindakan/:visitId', requireAuth, requireRole('clinical'), validate(statusSchema), asyncHandler(async (req, res) => {
+    res.json(await transitionKunjungan(db, req.params.visitId, req.body.status));
 }));
 
 export const igdRouter = router;

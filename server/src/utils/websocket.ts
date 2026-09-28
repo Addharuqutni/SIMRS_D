@@ -1,18 +1,16 @@
 /**
  * Lightweight WebSocket server for real-time queue updates.
  *
- * Uses the built-in `http` upgrade mechanism — no external socket.io
- * dependency. Clients connect to ws://host:port/ws and receive JSON
- * `event` messages. The server also exposes `emitQueueUpdate()` so
- * any Express route can broadcast a queue change to all connected
- * display boards / loket clients instantly.
+ * Clients connect to ws://host:port/ws and receive JSON messages; routes call
+ * `emitQueueUpdate()` / `emitQueueCalled()` to push queue changes to every
+ * display board and loket screen.
  *
- * Message shape (server → client):
- *   { "type": "queue:update", "poli": "UMU", "data": { ... } }
- *   { "type": "queue:called", "poli": "UMU", "code": "A-005", "loket": "Loket 1" }
+ * Message shape (server → client), always `{ type, data, timestamp }`:
+ *   { type: "queue:update", data: { poli, data: {...} }, timestamp }
+ *   { type: "queue:called", data: { poli, code, loket? }, timestamp }
+ *   { type: "connected",    data: { message }, timestamp }
  *
- * Message shape (client → server): none required (server-push only).
- * A heartbeat ping keeps the connection alive through proxies.
+ * The server pings every 30s and drops clients that stop answering.
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -21,6 +19,8 @@ import { logger } from './logger';
 
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
+const alive = new WeakMap<WebSocket, boolean>();
+const HEARTBEAT_MS = 30_000;
 
 /**
  * Attach the WebSocket server to an existing HTTP server.
@@ -31,19 +31,10 @@ export function initWebSocket(server: Server): WebSocketServer {
 
     wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         clients.add(ws);
+        alive.set(ws, true);
+        ws.on('pong', () => alive.set(ws, true));
         const ip = req.socket.remoteAddress || 'unknown';
         logger.info(`WS client connected from ${ip} (${clients.size} total)`);
-
-        ws.on('message', (raw: Buffer) => {
-            // Clients may send a "subscribe" message to filter by poli, but
-            // for simplicity we broadcast to everyone (small client count).
-            try {
-                const msg = JSON.parse(raw.toString());
-                logger.debug(`WS inbound: ${JSON.stringify(msg)}`);
-            } catch {
-                /* ignore malformed */
-            }
-        });
 
         ws.on('close', () => {
             clients.delete(ws);
@@ -55,9 +46,21 @@ export function initWebSocket(server: Server): WebSocketServer {
             clients.delete(ws);
         });
 
-        // Heartbeat: send ping every 30s; browser keeps connection alive.
-        ws.send(JSON.stringify({ type: 'connected', message: 'SIMRS WebSocket connected' }));
+        ws.send(JSON.stringify({ type: 'connected', data: { message: 'SIMRS WebSocket connected' }, timestamp: new Date().toISOString() }));
     });
+
+    const heartbeat = setInterval(() => {
+        for (const ws of clients) {
+            if (!alive.get(ws)) {
+                clients.delete(ws);
+                ws.terminate();
+                continue;
+            }
+            alive.set(ws, false);
+            ws.ping();
+        }
+    }, HEARTBEAT_MS);
+    wss.on('close', () => clearInterval(heartbeat));
 
     return wss;
 }

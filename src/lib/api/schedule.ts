@@ -1,93 +1,72 @@
+import { api } from '../axios';
+
+export const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'] as const;
+
 export interface Jadwal {
     id: number;
+    doctorId: string;
     dokter: string;
-    spesialis: string;
     poli: string;
+    dayOfWeek: number;
     hari: string;
-    jam: string;
-    kuotaJkn: number;
-    kuotaUmum: number;
-    status: 'aktif' | 'cuti';
+    startTime: string;
+    endTime: string;
+    quota: number;
+    aktif: boolean;
 }
 
+export interface JadwalInput {
+    doctorId: string;
+    poliId: string;
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+    quota: number;
+    aktif: boolean;
+}
+
+/** Today's queue for one poli, as returned by GET /schedules/queues/display. */
 export interface AntreanItem {
     poli: string;
-    dokter: string;
-    sedangDilayani: string;
+    dokter: string | null;
+    sedangDilayani: string | null;
+    loket: string | null;
     sisa: number;
     total: number;
 }
 
-import { api } from '../axios';
+interface ScheduleRow {
+    id: number; doctorId: string; doctorName: string | null; poliId: string; dayOfWeek: number;
+    startTime: string; endTime: string; quota: number; isActive: number;
+}
+
+const toPayload = (d: JadwalInput) => ({
+    doctorId: d.doctorId, poliId: d.poliId, dayOfWeek: d.dayOfWeek,
+    startTime: d.startTime, endTime: d.endTime, quota: d.quota, isActive: d.aktif ? 1 : 0,
+});
 
 export const scheduleApi = {
     getSchedules: async (): Promise<Jadwal[]> => {
-        const res = await api.get('/schedules');
-        const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-        return res.data.map((u: any) => ({
+        const res = await api.get<ScheduleRow[]>('/schedules');
+        return res.data.map((u) => ({
             id: u.id,
-            dokter: u.doctorName || u.doctorId,
-            spesialis: u.poliId,
+            doctorId: u.doctorId,
+            dokter: u.doctorName ?? u.doctorId,
             poli: u.poliId,
-            hari: dayNames[u.dayOfWeek] || 'Senin',
-            jam: `${u.startTime} - ${u.endTime}`,
-            kuotaJkn: u.quota || 20,
-            kuotaUmum: 10,
-            status: u.isActive === 1 ? 'aktif' : 'cuti'
+            dayOfWeek: u.dayOfWeek,
+            hari: HARI[u.dayOfWeek] ?? '-',
+            startTime: u.startTime,
+            endTime: u.endTime,
+            quota: u.quota,
+            aktif: u.isActive === 1,
         }));
     },
-    createSchedule: async (data: any) => {
-        const dayMap: Record<string, number> = { 'Minggu': 0, 'Senin': 1, 'Selasa': 2, 'Rabu': 3, 'Kamis': 4, 'Jumat': 5, 'Sabtu': 6 };
-        const payload = {
-            doctorId: data.dokter,
-            poliId: data.poli || 'Poli Umum',
-            dayOfWeek: dayMap[data.hari as string] ?? 1,
-            startTime: data.jam ? data.jam.split('-')[0].trim() : '08:00',
-            endTime: data.jam ? data.jam.split('-')[1]?.trim() || '12:00' : '12:00',
-            quota: data.kuotaJkn || 20,
-            isActive: data.status === 'aktif' ? 1 : 0
-        };
-        const res = await api.post('/schedules', payload);
-        return res.data;
-    },
-    updateSchedule: async (id: number, data: any) => {
-        const dayMap: Record<string, number> = { 'Minggu': 0, 'Senin': 1, 'Selasa': 2, 'Rabu': 3, 'Kamis': 4, 'Jumat': 5, 'Sabtu': 6 };
-        const payload = {
-            doctorId: data.dokter,
-            poliId: data.poli || 'Poli Umum',
-            dayOfWeek: dayMap[data.hari as string] ?? 1,
-            startTime: data.jam ? data.jam.split('-')[0].trim() : '08:00',
-            endTime: data.jam ? data.jam.split('-')[1]?.trim() || '12:00' : '12:00',
-            quota: data.kuotaJkn || 20,
-            isActive: data.status === 'aktif' ? 1 : 0
-        };
-        const res = await api.put(`/schedules/${id}`, payload);
-        return res.data;
-    },
-    deleteSchedule: async (id: number) => {
-        const res = await api.delete(`/schedules/${id}`);
-        return res.data;
-    },
+    createSchedule: (data: JadwalInput) => api.post('/schedules', toPayload(data)).then((res) => res.data),
+    updateSchedule: (id: number, data: JadwalInput) => api.put(`/schedules/${id}`, toPayload(data)).then((res) => res.data),
+    deleteSchedule: (id: number) => api.delete(`/schedules/${id}`).then((res) => res.data),
 
-    getDisplayQueues: async (): Promise<AntreanItem[]> => {
-        const res = await api.get('/schedules/queues/display');
-        if (!res.data || res.data.length === 0) {
-            return [
-                { poli: 'Poli Umum', dokter: 'Dr. Andi, Sp.PD', sedangDilayani: 'A-005', sisa: 12, total: 17 },
-                { poli: 'Poli Gigi', dokter: 'Drg. Sarah', sedangDilayani: 'B-012', sisa: 3, total: 15 },
-                { poli: 'Poli Bedah', dokter: 'Dr. Budi, Sp.B', sedangDilayani: 'C-002', sisa: 8, total: 10 }
-            ];
-        }
-        return res.data.map((q: { loket?: string; no_antrean: string }) => ({
-            poli: q.loket || 'Poli',
-            dokter: 'Dokter',
-            sedangDilayani: q.no_antrean,
-            sisa: 0,
-            total: 0
-        }));
-    },
-
-    nextQueue: async (poliId: string) => {
-        return await api.post('/schedules/queues/next', { poliId });
-    }
+    getDisplayQueues: () => api.get<AntreanItem[]>('/schedules/queues/display').then((res) => res.data),
+    nextQueue: (poliId: string) => api.post('/schedules/queues/next', { poliId }).then((res) => res.data),
+    skipQueue: (poliId: string) => api.post('/schedules/queues/skip', { poliId }).then((res) => res.data),
+    recallQueue: (poliId: string) => api.post('/schedules/queues/recall', { poliId }).then((res) => res.data),
 };

@@ -21,7 +21,7 @@ import { StatCard, Card } from '../../components/ui';
 import { useSession } from '../../lib/auth-client';
 import { useList } from '../../lib/query';
 import { reportsApi } from '../../lib/api/reports';
-import { useVisits } from '../../hooks/usePatient';
+import { useVisitList } from '../../hooks/usePatient';
 import { formatRp } from '../../lib/format';
 import styles from './dashboard.module.css';
 
@@ -38,7 +38,7 @@ const fmtTime = (iso: string) =>
 export function Dashboard() {
     const { data: session } = useSession();
     const { data: dash, isLoading: dashLoading, isError: dashError } = useList('dashboard', reportsApi.getDashboard);
-    const { data: visits, isLoading: visitsLoading } = useVisits();
+    const visits = useVisitList();
 
     const userName = session?.user?.name || 'Pengguna';
     const hour = new Date().getHours();
@@ -57,8 +57,8 @@ export function Dashboard() {
         kunjungan: t.jumlah,
     }));
 
-    // Today's visits grouped per poli
-    const visitList = visits ?? [];
+    // Today's visits grouped per poli (rows are the latest page of registrations, newest first)
+    const visitList = visits.rows;
     const todayStr = new Date().toDateString();
     const todayVisits = visitList.filter((v) => {
         const d = new Date(v.waktu);
@@ -72,6 +72,13 @@ export function Dashboard() {
     )
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count);
+
+    // Server-side total for today, rendered in the card header when it exceeds the loaded page
+    const todayKey = (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    const todayVisitCount = dash?.trenKunjungan.find((t) => t.tanggal === todayKey)?.jumlah ?? todayVisits.length;
 
     // Latest 5 registrations as the activity feed
     const activities = visitList
@@ -192,10 +199,13 @@ export function Dashboard() {
                     </div>
                 </Card>
 
-                <Card title="Kunjungan per Poli Hari Ini" icon={<ClipboardList size={18} />}>
+                <Card title="Kunjungan per Poli Hari Ini" icon={<ClipboardList size={18} />}
+                    action={todayVisitCount > visitList.length ? <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{todayVisitCount} kunjungan hari ini</span> : undefined}>
                     <div>
-                        {visitsLoading ? (
+                        {visits.isLoading ? (
                             <div style={{ padding: '16px 0', color: 'var(--text-muted)', fontSize: '14px' }}>Memuat data…</div>
+                        ) : visits.isError ? (
+                            <div style={{ padding: '16px 0', color: 'var(--text-muted)', fontSize: '14px' }}>Gagal memuat data kunjungan</div>
                         ) : queueData.length === 0 ? (
                             <div style={{ padding: '16px 0', color: 'var(--text-muted)', fontSize: '14px' }}>Belum ada kunjungan hari ini</div>
                         ) : (
@@ -214,8 +224,10 @@ export function Dashboard() {
             <div className={styles.bottomRow}>
                 <Card title="Aktivitas Terkini" icon={<Activity size={18} />}>
                     <div>
-                        {visitsLoading ? (
+                        {visits.isLoading ? (
                             <div style={{ padding: '16px 0', color: 'var(--text-muted)', fontSize: '14px' }}>Memuat data…</div>
+                        ) : visits.isError ? (
+                            <div style={{ padding: '16px 0', color: 'var(--text-muted)', fontSize: '14px' }}>Gagal memuat aktivitas</div>
                         ) : activities.length === 0 ? (
                             <div style={{ padding: '16px 0', color: 'var(--text-muted)', fontSize: '14px' }}>Belum ada aktivitas</div>
                         ) : (

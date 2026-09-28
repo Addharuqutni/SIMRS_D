@@ -1,7 +1,8 @@
-import { useList, useMutate } from '../lib/query';
+import { useMutate } from '../lib/query';
+import { useListQuery } from '../lib/list-query';
 import { igdApi } from '../lib/api/igd';
 
-export const useDaftarIgd = () => useList('igd-daftar', igdApi.getDaftarIgd);
-export const useCreateAdmisiIgd = () => useMutate(igdApi.createAdmisi, 'igd-daftar');
-export const useUpdateStatusTindakan = () =>
-    useMutate(({ visitId, status }: { visitId: string; status: string }) => igdApi.updateStatusTindakan(visitId, status), 'igd-daftar');
+export const useIgdList = () => useListQuery('igd-daftar', igdApi.list);
+export const useCreateAdmisiIgd = () => useMutate(igdApi.createAdmisi, 'igd-daftar', 'visits', 'queues-display');
+export const useUpdateIgdStatus = () =>
+    useMutate(({ visitId, status }: { visitId: string; status: string }) => igdApi.updateStatus(visitId, status), 'igd-daftar', 'visits');

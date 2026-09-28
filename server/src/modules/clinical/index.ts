@@ -7,7 +7,7 @@ import { users } from '../../db/schemas/auth';
 import { notifications } from '../../db/schemas/notify';
 import { eq, desc, and, or, ilike } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../../middleware/auth';
-import { ROLE_GROUPS } from '../../utils/roles';
+
 import { validate } from '../../middleware/validate';
 import { asyncHandler } from '../../middleware/error';
 import { icd10Codes } from '../../db/schemas/icd10';
@@ -16,41 +16,12 @@ import { medicines } from '../../db/schemas/inventory';
 import { saveSoapSchema, saveVitalSignsSchema, saveProgressNoteSchema, createPrescriptionSchema, createOrderSchema } from './schema';
 import { computeMews, mewsActionFor } from '../../utils/mews';
 import { nanoid } from 'nanoid';
+import { kunjunganRouter } from './kunjungan.routes';
+import { resepRouter } from './resep.routes';
+import { clinicalOrdersRouter } from './orders.routes';
 
 const router = Router();
 
-// ==========================================
-// RAWAT JALAN & EMR SOAP
-// ==========================================
-
-// GET Rawat Jalan Visits
-router.get('/rawat-jalan', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
-    const data = await db.select({
-        id: visits.id,
-        nama: patients.nama,
-        rm: patients.rm,
-        alergi: patients.alergi,
-        poli: visits.poliId,
-        dokter: users.name,
-        dokterId: visits.dokterId,
-        status: visits.status,
-        waktu: visits.waktuDaftar
-    }).from(visits)
-        .leftJoin(patients, eq(visits.patientId, patients.id))
-        .leftJoin(users, eq(visits.dokterId, users.id))
-        .where(eq(visits.tipeKunjungan, 'rawat_jalan'))
-        .orderBy(desc(visits.waktuDaftar));
-
-    res.json(data);
-}));
-
-// PUT Update Rawat Jalan Status
-router.put('/rawat-jalan/:id/status', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
-    await db.update(visits).set({ status: req.body.status }).where(eq(visits.id, req.params.id));
-    res.json({ success: true });
-}));
-
-// GET ICD-10 diagnosis codes (search by code or description)
 router.get('/icd10', requireAuth, asyncHandler(async (req, res) => {
     const q = ((req.query.q as string) || '').trim();
     if (q.length < 2) {
@@ -86,7 +57,7 @@ router.get('/icd9', requireAuth, asyncHandler(async (req, res) => {
 
 // GET lightweight medicines list for prescription picker (clinical roles;
 // /inventory itself is pharmacy-only)
-router.get('/medicines', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
+router.get('/medicines', requireAuth, requireRole('clinical'), asyncHandler(async (req, res) => {
     const data = await db.select({
         id: medicines.id,
         kodeObat: medicines.kodeObat,
@@ -99,7 +70,7 @@ router.get('/medicines', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyn
 }));
 
 // GET EMR SOAP for a visit
-router.get('/soap/:visitId', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
+router.get('/soap/:visitId', requireAuth, requireRole('clinical'), asyncHandler(async (req, res) => {
     const data = await db.select().from(emrSoap).where(eq(emrSoap.visitId, req.params.visitId));
     if (!data[0]) {
         res.json(null);
@@ -124,7 +95,7 @@ router.get('/soap/:visitId', requireAuth, requireRole(...ROLE_GROUPS.clinical), 
 }));
 
 // POST EMR SOAP for a visit
-router.post('/soap', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(saveSoapSchema), asyncHandler(async (req, res) => {
+router.post('/soap', requireAuth, requireRole('clinical'), validate(saveSoapSchema), asyncHandler(async (req, res) => {
     // Serialize the ICD-10 / ICD-9 code arrays into the text columns
     const payload = {
         ...req.body,
@@ -154,7 +125,7 @@ router.post('/soap', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate
 // ==========================================
 
 // GET all vital signs for a visit (timeline for trending chart)
-router.get('/vital-signs/:visitId', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
+router.get('/vital-signs/:visitId', requireAuth, requireRole('clinical'), asyncHandler(async (req, res) => {
     const rows = await db.select({
         id: vitalSigns.id,
         visitId: vitalSigns.visitId,
@@ -190,7 +161,7 @@ router.get('/vital-signs/:visitId', requireAuth, requireRole(...ROLE_GROUPS.clin
 
 // POST new vital signs record — auto-computes MEWS and creates a critical
 // notification for the responsible doctor when score >= 3 (deterioration).
-router.post('/vital-signs', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(saveVitalSignsSchema), asyncHandler(async (req, res) => {
+router.post('/vital-signs', requireAuth, requireRole('clinical'), validate(saveVitalSignsSchema), asyncHandler(async (req, res) => {
     const { recordedBy, visitId, ...rest } = req.body;
 
     const mews = computeMews({
@@ -243,7 +214,7 @@ router.post('/vital-signs', requireAuth, requireRole(...ROLE_GROUPS.clinical), v
 // ==========================================
 
 // GET all progress notes for a visit (longitudinal timeline)
-router.get('/progress-notes/:visitId', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
+router.get('/progress-notes/:visitId', requireAuth, requireRole('clinical'), asyncHandler(async (req, res) => {
     const rows = await db.select({
         id: emrProgressNotes.id,
         visitId: emrProgressNotes.visitId,
@@ -277,7 +248,7 @@ router.get('/progress-notes/:visitId', requireAuth, requireRole(...ROLE_GROUPS.c
 }));
 
 // POST new progress note (CPPT entry)
-router.post('/progress-notes', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(saveProgressNoteSchema), asyncHandler(async (req, res) => {
+router.post('/progress-notes', requireAuth, requireRole('clinical'), validate(saveProgressNoteSchema), asyncHandler(async (req, res) => {
     const payload = {
         ...req.body,
         icd10Codes: JSON.stringify(req.body.icd10Codes || []),
@@ -340,7 +311,7 @@ router.get('/fhir/:visitId', requireAuth, asyncHandler(async (req, res) => {
 // ==========================================
 
 // POST /clinical/cdss/icd-suggest — auto-suggest ICD-10 from SOAP text
-router.post('/cdss/icd-suggest', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
+router.post('/cdss/icd-suggest', requireAuth, requireRole('clinical'), asyncHandler(async (req, res) => {
     const { text } = req.body as { text?: string };
     if (!text || text.trim().length < 3) {
         res.json({ suggestions: [] });
@@ -352,7 +323,7 @@ router.post('/cdss/icd-suggest', requireAuth, requireRole(...ROLE_GROUPS.clinica
 }));
 
 // POST /clinical/cdss/ddi-check — check drug-drug interactions
-router.post('/cdss/ddi-check', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
+router.post('/cdss/ddi-check', requireAuth, requireRole('clinical'), asyncHandler(async (req, res) => {
     const { medicineNames } = req.body as { medicineNames?: string[] };
     if (!Array.isArray(medicineNames) || medicineNames.length < 2) {
         res.json({ alerts: [] });
@@ -363,228 +334,9 @@ router.post('/cdss/ddi-check', requireAuth, requireRole(...ROLE_GROUPS.clinical)
     res.json({ alerts });
 }));
 
-// POST E-Resep / Prescription
-router.post('/prescription', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(createPrescriptionSchema), asyncHandler(async (req, res) => {
-    const { visitId, dokterId, items } = req.body;
-
-    await db.transaction(async (tx) => {
-        const prescId = `R/X-${Date.now()}`;
-        await tx.insert(prescriptions).values({
-            id: prescId,
-            noResep: prescId,
-            visitId,
-            dokterId,
-            status: 'baru'
-        });
-
-        const insertedItems = items.map((i: any) => ({
-            id: nanoid(),
-            prescriptionId: prescId,
-            obatId: i.obatId,
-            dosis: i.dosis,
-            jumlah: i.jumlah,
-            keterangan: i.keterangan
-        }));
-
-        await tx.insert(prescriptionItems).values(insertedItems);
-    });
-
-    res.status(201).json({ success: true, message: 'Resep elektronik berhasil dibuat' });
-}));
-
-// ==========================================
-// E-RECIPE KEMENKES — Sign prescription & generate QR payload
-// ==========================================
-
-// POST /clinical/prescription/:id/sign-e-recipe
-// Generates the e-Recipe QR payload (Kemenkes format) for a prescription.
-router.post('/prescription/:id/sign-e-recipe', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const ERECIPE_SECRET = process.env.ERECIPE_SECRET || 'simrs-erecipe-dev-key-change-in-prod';
-
-    // Load prescription with joined doctor, patient, visit, and items
-    const prescRows = await db.select({
-        id: prescriptions.id,
-        noResep: prescriptions.noResep,
-        visitId: prescriptions.visitId,
-        dokterId: prescriptions.dokterId,
-        dokterName: users.name,
-    })
-        .from(prescriptions)
-        .leftJoin(users, eq(prescriptions.dokterId, users.id))
-        .where(eq(prescriptions.id, id))
-        .limit(1);
-
-    if (!prescRows.length) {
-        return res.status(404).json({ error: 'Resep tidak ditemukan' });
-    }
-    const presc = prescRows[0];
-
-    // Get visit + patient
-    const visitRows = await db.select({
-        patientId: visits.patientId,
-        patientName: patients.nama,
-        rm: patients.rm,
-        nik: patients.nik,
-        tanggalLahir: patients.tanggalLahir,
-    })
-        .from(visits)
-        .leftJoin(patients, eq(visits.patientId, patients.id))
-        .where(eq(visits.id, presc.visitId))
-        .limit(1);
-
-    if (!visitRows.length) {
-        return res.status(404).json({ error: 'Kunjungan tidak ditemukan' });
-    }
-    const pat = visitRows[0];
-
-    // Get prescription items + medicine details
-    const itemRows = await db.select({
-        kodeObat: medicines.kodeObat,
-        namaObat: medicines.nama,
-        satuan: medicines.satuan,
-        dosis: prescriptionItems.dosis,
-        jumlah: prescriptionItems.jumlah,
-        keterangan: prescriptionItems.keterangan,
-    })
-        .from(prescriptionItems)
-        .leftJoin(medicines, eq(prescriptionItems.obatId, String(medicines.id)))
-        .where(eq(prescriptionItems.prescriptionId, id));
-
-    const { generateERecipe } = await import('../../utils/erecipe');
-    const { payload, qrString } = generateERecipe({
-        noResep: presc.noResep,
-        dokter: { nama: presc.dokterName || 'Dokter', sip: presc.dokterId },
-        pasien: {
-            nama: pat.patientName || '',
-            rm: pat.rm || '',
-            nik: pat.nik || undefined,
-            tanggalLahir: pat.tanggalLahir || undefined,
-        },
-        items: itemRows.map((i) => ({
-            kodeObat: i.kodeObat || '',
-            namaObat: i.namaObat || '',
-            dosis: i.dosis,
-            jumlah: i.jumlah,
-            satuan: i.satuan || undefined,
-            signa: i.keterangan || undefined,
-        })),
-    }, ERECIPE_SECRET);
-
-    // Persist the e-Recipe code + QR payload
-    await db.update(prescriptions)
-        .set({
-            eRecipeCode: payload.kodeUnik,
-            eRecipeQrPayload: JSON.stringify(payload),
-            eRecipeSignedAt: new Date(),
-        })
-        .where(eq(prescriptions.id, id));
-
-    res.json({
-        success: true,
-        eRecipeCode: payload.kodeUnik,
-        qrString,
-        payload,
-    });
-}));
-
-// POST Orders (Lab / Radiology)
-router.post('/orders/:type', requireAuth, requireRole(...ROLE_GROUPS.clinical), validate(createOrderSchema), asyncHandler(async (req, res) => {
-    const { type } = req.params;
-    const { visitId, dokterId, jenisPemeriksaan, catatan } = req.body;
-
-    if (type === 'lab') {
-        const inserted = await db.insert(labOrders).values({
-            id: `LAB-${Date.now()}`,
-            visitId,
-            dokterId,
-            jenisPemeriksaan,
-            catatan,
-            status: 'menunggu'
-        }).returning();
-        res.status(201).json(inserted[0]);
-    } else if (type === 'radiology') {
-        const inserted = await db.insert(radiologyOrders).values({
-            id: `RAD-${Date.now()}`,
-            visitId,
-            dokterId,
-            jenisPemeriksaan,
-            catatan,
-            status: 'menunggu'
-        }).returning();
-        res.status(201).json(inserted[0]);
-    }
-}));
-
-// ==========================================
-// RAWAT INAP (ADMISI)
-// ==========================================
-
-// GET Rawat Inap Patients
-router.get('/rawat-inap', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
-    const data = await db.select({
-        id: rawatInapAdmisi.id,
-        visitId: visits.id,
-        rm: patients.rm,
-        pasien: patients.nama,
-        ruangan: rawatInapAdmisi.ruanganId,
-        kelas: rawatInapAdmisi.kelas,
-        masuk: rawatInapAdmisi.waktuMasuk,
-        dpjp: users.name,
-        status: rawatInapAdmisi.status
-    }).from(rawatInapAdmisi)
-        .leftJoin(visits, eq(rawatInapAdmisi.visitId, visits.id))
-        .leftJoin(patients, eq(visits.patientId, patients.id))
-        .leftJoin(users, eq(visits.dokterId, users.id))
-        .orderBy(desc(rawatInapAdmisi.waktuMasuk));
-
-    res.json(data);
-}));
-
-// POST Rawat Inap Admisi
-router.post('/rawat-inap/admisi', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
-    // In real app, you might link to an existing visit or create a new one.
-    // Based on UI form (pasien, ruangan, kelas, dpjp), we will simulate full chain if needed.
-    let generatedRM = `RM${Math.floor(100000 + Math.random() * 900000)}`;
-
-    const newPatient = await db.insert(patients).values({
-        id: `PAT-${Date.now()}`,
-        rm: generatedRM,
-        nama: req.body.pasien,
-        gender: 'L',
-        alamat: 'Rawat Inap'
-    }).returning();
-
-    const newVisit = await db.insert(visits).values({
-        id: `VST-${Date.now()}`,
-        patientId: newPatient[0].id,
-        poliId: 'Rawat Inap',
-        dokterId: req.body.dpjp || 'dr. Default',
-        jaminan: 'Umum / Mandiri',
-        tipeKunjungan: 'rawat_inap',
-        status: 'dirawat'
-    }).returning();
-
-    const admisi = await db.insert(rawatInapAdmisi).values({
-        id: `INP-${Date.now()}`,
-        visitId: newVisit[0].id,
-        ruanganId: req.body.ruangan,
-        kelas: req.body.kelas,
-        status: 'dirawat'
-    }).returning();
-
-    res.status(201).json(admisi[0]);
-}));
-
-// PUT Update Rawat Inap Status
-router.put('/rawat-inap/:id/status', requireAuth, requireRole(...ROLE_GROUPS.clinical), asyncHandler(async (req, res) => {
-    await db.update(rawatInapAdmisi)
-        .set({
-            status: req.body.status,
-            waktuKeluar: req.body.status === 'pulang' ? new Date() : null
-        })
-        .where(eq(rawatInapAdmisi.id, req.params.id));
-    res.json({ success: true });
-}));
+// Kunjungan (rawat jalan / rawat inap), Resep and order routes live in their own files.
+router.use(kunjunganRouter);
+router.use(resepRouter);
+router.use(clinicalOrdersRouter);
 
 export const clinicalRouter = router;

@@ -1,15 +1,32 @@
 import { api } from '../axios';
+import type { Page, PageQuery } from '../../../shared/page';
+import type { AdmitInput } from '../../../shared/admission';
+import type { CreateOrderInput, Order } from './penunjang';
 
 export interface RawatJalanPatient {
     id: string;
+    patientId: string;
     nama: string;
     rm: string;
     poli: string;
-    dokter: string;
+    dokter: string | null;
     dokterId: string;
-    status: 'menunggu' | 'pemeriksaan' | 'selesai';
+    jaminan: string;
+    status: string;
     waktu: string;
     alergi?: string | null;
+}
+
+export interface RiwayatKunjungan {
+    id: string;
+    waktu: string;
+    poli: string;
+    tipe: string;
+    dokter: string | null;
+    status: string;
+    asesmen: string | null;
+    planning: string | null;
+    icd10Codes: string[] | null;
 }
 
 export interface EmrSoap {
@@ -110,16 +127,19 @@ export interface RawatInapPatient {
     ruangan: string;
     kelas: string;
     masuk: string;
-    dpjp: string;
-    status: 'dirawat' | 'kritis' | 'rencana_pulang' | 'pulang';
+    keluar: string | null;
+    dpjp: string | null;
+    jaminan: string;
+    status: string;
 }
+
+export type RawatInapAdmisiData = Omit<Extract<AdmitInput, { jenis: 'rawat_inap' }>, 'jenis'>;
 
 export const clinicalApi = {
     // Rawat Jalan
-    getRawatJalan: async (): Promise<RawatJalanPatient[]> => {
-        const res = await api.get('/clinical/rawat-jalan');
-        return res.data;
-    },
+    listRawatJalan: (q: PageQuery) => api.get<Page<RawatJalanPatient>>('/clinical/rawat-jalan', { params: q }).then((res) => res.data),
+    getKunjungan: (id: string) => api.get<RawatJalanPatient>(`/clinical/rawat-jalan/${id}`).then((res) => res.data),
+    getRiwayat: (id: string) => api.get<RiwayatKunjungan[]>(`/clinical/rawat-jalan/${id}/riwayat`).then((res) => res.data),
     updateRawatJalanStatus: async (id: string, status: string) => {
         const res = await api.put(`/clinical/rawat-jalan/${id}/status`, { status });
         return res.data;
@@ -146,16 +166,13 @@ export const clinicalApi = {
         const res = await api.get('/clinical/medicines');
         return res.data;
     },
-    createPrescription: async (data: { visitId: string; dokterId: string; items: any[] }) => {
-        const res = await api.post('/clinical/prescription', data);
-        return res.data;
-    },
     signERecipe: async (prescriptionId: string): Promise<{ success: boolean; eRecipeCode: string; qrString: string; payload: unknown }> => {
         const res = await api.post(`/clinical/prescription/${prescriptionId}/sign-e-recipe`);
         return res.data;
     },
-    createOrder: async (type: 'lab' | 'radiology', data: { visitId: string; dokterId: string; jenisPemeriksaan: string; catatan?: string }) => {
-        const res = await api.post(`/clinical/orders/${type}`, data);
+    /** EMR order entry — same server operation as the unit worklists. */
+    createOrder: async (type: 'lab' | 'radiology', data: CreateOrderInput): Promise<Order> => {
+        const res = await api.post<Order>(`/clinical/orders/${type}`, data);
         return res.data;
     },
 
@@ -202,14 +219,9 @@ export const clinicalApi = {
     },
 
     // Rawat Inap
-    getRawatInap: async (): Promise<RawatInapPatient[]> => {
-        const res = await api.get('/clinical/rawat-inap');
-        return res.data;
-    },
-    createAdmisiInap: async (data: { pasien: string; ruangan: string; kelas: string; dpjp: string }) => {
-        const res = await api.post('/clinical/rawat-inap/admisi', data);
-        return res.data;
-    },
+    listRawatInap: (q: PageQuery) => api.get<Page<RawatInapPatient>>('/clinical/rawat-inap', { params: q }).then((res) => res.data),
+    createAdmisiInap: (data: RawatInapAdmisiData) =>
+        api.post<{ visitId: string; rm: string }>('/clinical/rawat-inap/admisi', data).then((res) => res.data),
     updateRawatInapStatus: async (id: string, status: string) => {
         const res = await api.put(`/clinical/rawat-inap/${id}/status`, { status });
         return res.data;

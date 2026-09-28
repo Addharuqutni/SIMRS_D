@@ -4,6 +4,7 @@ import { admin, createAccessControl } from "better-auth/plugins";
 import { db } from "./index";
 import * as schema from "./schemas";
 import { frontendUrls, devOrigins } from "../utils/origins";
+import { ROLES } from "../../../shared/access";
 
 // Access-control statements for the admin plugin endpoints (e.g. setUserPassword).
 const auditAc = createAccessControl({
@@ -28,10 +29,10 @@ export const auth = betterAuth({
     },
     plugins: [
         admin({
-            // Superadmin is this app's admin role (ROLE_GROUPS.admin in src/utils/roles.ts)
-            adminRoles: ["Superadmin"],
+            // Superadmin is this app's admin role (capability 'admin' in shared/access.ts)
+            adminRoles: [ROLES.SUPERADMIN],
             roles: {
-                Superadmin: auditAc.newRole({
+                [ROLES.SUPERADMIN]: auditAc.newRole({
                     user: ["create", "list", "set-role", "ban", "impersonate", "delete", "set-password", "get", "update"],
                     session: ["list", "revoke", "delete"],
                 }),

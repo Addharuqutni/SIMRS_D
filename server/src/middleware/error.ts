@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { logger } from '../utils/logger';
+import { DomainError } from '../utils/domain-error';
 
 export const notFoundHandler = (req: Request, res: Response) => {
     res.status(404).json({ error: 'Not Found' });
@@ -12,6 +13,10 @@ export const errorHandler = (err: unknown, req: Request, res: Response, _next: N
             error: 'Validation failed',
             details: err.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
         });
+    }
+
+    if (err instanceof DomainError) {
+        return res.status(err.status).json({ error: err.message });
     }
 
     // body-parser errors: oversized body, malformed JSON

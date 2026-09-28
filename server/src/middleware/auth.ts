@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { auth } from '../db/auth';
-import { hasAnyRoleLike } from '../utils/roles';
+import { can, type Capability } from '../../../shared/access';
 
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -23,11 +23,10 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 };
 
-export const requireRole = (...roles: string[]) => {
+/** Allows the request when the user's role holds any of `capabilities` (exact role match). */
+export const requireRole = (...capabilities: Capability[]) => {
     return (req: Request, res: Response, next: NextFunction) => {
-        const role = req.user?.role;
-
-        if (!role || !hasAnyRoleLike(role, roles)) {
+        if (!can(req.user?.role, ...capabilities)) {
             return res.status(403).json({ error: 'Forbidden' });
         }
 

@@ -8,7 +8,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist', 'server/dist', 'server/node_modules', 'server/**']),
   {
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'shared/**/*.ts'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,

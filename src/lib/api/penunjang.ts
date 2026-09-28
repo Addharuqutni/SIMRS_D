@@ -1,92 +1,71 @@
 import { api } from '../axios';
+import type { Page, PageQuery } from '../../../shared/page';
 
-export interface LabOrder {
+/** Penunjang units share one contract; only the URL segment differs. */
+export type OrderKind = 'lab' | 'radiologi';
+
+const BASE: Record<OrderKind, string> = { lab: '/laboratory', radiologi: '/radiology' };
+
+export interface Order {
+    /** Server-issued `LAB-<nanoid>` / `RAD-<nanoid>`. */
     id: string;
     visitId: string;
+    patientName: string | null;
+    rm: string | null;
     dokterId: string;
-    dokterName?: string;
-    patientName?: string;
-    rm?: string;
+    dokterName: string | null;
     jenisPemeriksaan: string;
-    catatan?: string;
-    status: 'menunggu' | 'diproses' | 'selesai' | 'batal';
-    hasilUrl?: string;
-    hasilTeks?: string;
+    catatan: string | null;
+    status: 'menunggu' | 'diproses' | 'selesai' | 'batal' | string;
+    /** Uploaded PDF path (`/uploads/...`), null until a hasil is attached. */
+    hasilUrl: string | null;
+    /** Lab result text (null for radiologi orders). */
+    hasilTeks: string | null;
+    /** Radiologist's reading (null for lab orders). */
+    expertise: string | null;
     waktuOrder: string;
-    waktuSelesai?: string;
+    waktuSelesai: string | null;
 }
 
-export interface RadiologyOrder {
-    id: string;
+export interface CreateOrderInput {
     visitId: string;
     dokterId: string;
-    dokterName?: string;
-    patientName?: string;
-    rm?: string;
     jenisPemeriksaan: string;
-    catatan?: string;
-    status: 'menunggu' | 'diproses' | 'selesai' | 'batal';
-    hasilDicomUrl?: string;
-    expertise?: string;
-    waktuOrder: string;
-    waktuSelesai?: string;
+    catatan?: string | null;
 }
 
-export const labApi = {
-    getOrders: async (): Promise<LabOrder[]> => {
-        const res = await api.get('/laboratory');
-        return res.data;
+export interface CompleteOrderInput {
+    hasilTeks?: string | null;
+    expertise?: string | null;
+    catatan?: string | null;
+}
+
+export const penunjangApi = {
+    listOrders: (kind: OrderKind, q: PageQuery) =>
+        api.get<Page<Order>>(BASE[kind], { params: q }).then((res) => res.data),
+    getOrder: (kind: OrderKind, id: string) =>
+        api.get<Order>(`${BASE[kind]}/${encodeURIComponent(id)}`).then((res) => res.data),
+    createOrder: (kind: OrderKind, data: CreateOrderInput) =>
+        api.post<Order>(BASE[kind], data).then((res) => res.data),
+    startOrder: (kind: OrderKind, id: string) =>
+        api.put<{ id: string; status: string }>(`${BASE[kind]}/${encodeURIComponent(id)}/start`).then((res) => res.data),
+    completeOrder: (kind: OrderKind, id: string, data: CompleteOrderInput) =>
+        api.put<{ id: string; status: string; waktuSelesai: string }>(`${BASE[kind]}/${encodeURIComponent(id)}/complete`, data)
+            .then((res) => res.data),
+    cancelOrder: (kind: OrderKind, id: string) =>
+        api.put<{ id: string; status: string }>(`${BASE[kind]}/${encodeURIComponent(id)}/cancel`).then((res) => res.data),
+    uploadHasil: (kind: OrderKind, id: string, file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        // Content-Type override lets the browser set the multipart boundary.
+        return api.post<Order>(`${BASE[kind]}/${encodeURIComponent(id)}/hasil`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        }).then((res) => res.data);
     },
-    createOrder: async (data: any): Promise<LabOrder> => {
-        const res = await api.post('/laboratory', data);
-        return res.data;
-    },
-    updateOrder: async (id: string, data: any) => {
-        const res = await api.put(`/laboratory/${id}`, data);
-        return res.data;
-    },
-    deleteOrder: async (id: string) => {
-        const res = await api.delete(`/laboratory/${id}`);
-        return res.data;
-    },
-    uploadHasil: (id: string, file: File) => uploadHasil('lab', id, file)
 };
 
-export const radApi = {
-    getOrders: async (): Promise<RadiologyOrder[]> => {
-        const res = await api.get('/radiology');
-        return res.data;
-    },
-    createOrder: async (data: any): Promise<RadiologyOrder> => {
-        const res = await api.post('/radiology', data);
-        return res.data;
-    },
-    updateOrder: async (id: string, data: any) => {
-        const res = await api.put(`/radiology/${id}`, data);
-        return res.data;
-    },
-    deleteOrder: async (id: string) => {
-        const res = await api.delete(`/radiology/${id}`);
-        return res.data;
-    },
-    uploadHasil: (id: string, file: File) => uploadHasil('rad', id, file)
-};
-
-// Upload hasil pemeriksaan as PDF (multipart) — Content-Type override lets
-// the browser set the multipart boundary (axios default is JSON).
-export const uploadHasil = async (kind: 'lab' | 'rad', id: string, file: File) => {
-    const base = kind === 'lab' ? '/laboratory' : '/radiology';
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const res = await api.post(`${base}/${id}/hasil`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return res.data;
-};
-
-// Uploaded hasil paths are relative to the server origin (e.g. /uploads/x.pdf)
-export const hasilFileUrl = (path?: string) => {
+/** Uploaded hasil paths are relative to the server origin (e.g. /uploads/x.pdf). */
+export const hasilFileUrl = (path?: string | null) => {
     if (!path) return undefined;
     const origin = (api.defaults.baseURL || '').replace(/\/api\/v1\/?$/, '');
     return `${origin}${path}`;

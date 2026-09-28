@@ -1,21 +1,25 @@
-import { useList, useMutate } from '../lib/query';
-import { labApi, radApi } from '../lib/api/penunjang';
-import type { LabOrder, RadiologyOrder } from '../lib/api/penunjang';
+import { useListQuery } from '../lib/list-query';
+import { useMutate } from '../lib/query';
+import { penunjangApi, type CompleteOrderInput, type CreateOrderInput, type OrderKind } from '../lib/api/penunjang';
 
-// LABORATORY
-export const useLabOrders = () => useList('lab-orders', labApi.getOrders);
-export const useCreateLabOrder = () => useMutate(labApi.createOrder, 'lab-orders');
-export const useUpdateLabOrder = () =>
-    useMutate(({ id, data }: { id: string, data: Partial<LabOrder> }) => labApi.updateOrder(id, data), 'lab-orders');
-export const useDeleteLabOrder = () => useMutate(labApi.deleteOrder, 'lab-orders');
-export const useUploadLabHasil = () =>
-    useMutate(({ id, file }: { id: string, file: File }) => labApi.uploadHasil(id, file), 'lab-orders');
+/** Key namespace per unit so the two lists never invalidate each other. */
+const key = (kind: OrderKind) => (kind === 'lab' ? 'lab-orders' : 'rad-orders');
 
-// RADIOLOGY
-export const useRadiologyOrders = () => useList('rad-orders', radApi.getOrders);
-export const useCreateRadiologyOrder = () => useMutate(radApi.createOrder, 'rad-orders');
-export const useUpdateRadiologyOrder = () =>
-    useMutate(({ id, data }: { id: string, data: Partial<RadiologyOrder> }) => radApi.updateOrder(id, data), 'rad-orders');
-export const useDeleteRadiologyOrder = () => useMutate(radApi.deleteOrder, 'rad-orders');
-export const useUploadRadHasil = () =>
-    useMutate(({ id, file }: { id: string, file: File }) => radApi.uploadHasil(id, file), 'rad-orders');
+/** Server-paginated worklist for one penunjang unit. */
+export const usePenunjangOrders = (kind: OrderKind) =>
+    useListQuery(key(kind), (q) => penunjangApi.listOrders(kind, q));
+
+export const useCreatePenunjangOrder = (kind: OrderKind) =>
+    useMutate((input: CreateOrderInput) => penunjangApi.createOrder(kind, input), key(kind), 'billings');
+
+export const useStartPenunjangOrder = (kind: OrderKind) =>
+    useMutate((id: string) => penunjangApi.startOrder(kind, id), key(kind));
+
+export const useCompletePenunjangOrder = (kind: OrderKind) =>
+    useMutate(({ id, data }: { id: string; data: CompleteOrderInput }) => penunjangApi.completeOrder(kind, id, data), key(kind));
+
+export const useCancelPenunjangOrder = (kind: OrderKind) =>
+    useMutate((id: string) => penunjangApi.cancelOrder(kind, id), key(kind), 'billings');
+
+export const useUploadPenunjangHasil = (kind: OrderKind) =>
+    useMutate(({ id, file }: { id: string; file: File }) => penunjangApi.uploadHasil(kind, id, file), key(kind));

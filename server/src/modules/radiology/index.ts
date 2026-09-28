@@ -1,8 +1,5 @@
-import { radiologyOrders } from '../../db/schemas/clinical';
-import { ROLE_GROUPS } from '../../utils/roles';
-import { createOrdersRouter } from '../orders';
+import { createPenunjangRouter } from '../penunjang/routes';
 
-export const radiologyRouter = createOrdersRouter(radiologyOrders, ROLE_GROUPS.lab, 'RAD-', {
-    hasilDicomUrl: radiologyOrders.hasilDicomUrl,
-    expertise: radiologyOrders.expertise
-}, 'hasilDicomUrl');
+// Radiology (RIS) worklist — orders, expertise and hasil PDFs. Rules live in
+// modules/penunjang/orders.ts; this file only binds the unit's routes.
+export const radiologyRouter = createPenunjangRouter('radiologi');

@@ -1,8 +1,5 @@
-import { labOrders } from '../../db/schemas/clinical';
-import { ROLE_GROUPS } from '../../utils/roles';
-import { createOrdersRouter } from '../orders';
+import { createPenunjangRouter } from '../penunjang/routes';
 
-export const laboratoryRouter = createOrdersRouter(labOrders, ROLE_GROUPS.lab, 'LAB-', {
-    hasilUrl: labOrders.hasilUrl,
-    hasilTeks: labOrders.hasilTeks
-}, 'hasilUrl');
+// Laboratory (LIS) worklist — orders, results and hasil PDFs. Rules live in
+// modules/penunjang/orders.ts; this file only binds the unit's routes.
+export const laboratoryRouter = createPenunjangRouter('lab');

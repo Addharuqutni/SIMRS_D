@@ -1,25 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import { useList, useMutate } from '../lib/query';
+import { useMutate } from '../lib/query';
 import { masterApi } from '../lib/api/master';
 
-export const useMasterUsers = () => useList('master-users', masterApi.getUsers);
-export const useDoctors = () => useList('doctors', masterApi.getDoctors);
-
-// q is part of the key so each search term gets its own cache entry
-export const useAuditLogs = (q: string) =>
+/** Active doctors for pickers (registrasi, IGD, rawat inap, jadwal, penunjang). */
+export const useDoctors = () =>
     useQuery({
-        queryKey: ['audit-logs', q],
-        queryFn: () => masterApi.getAuditLogs(q),
+        queryKey: ['doctors'],
+        queryFn: () => masterApi.getDoctors(),
     });
 
 export const useResetPassword = () =>
     useMutate(
         (vars: { id: string; password: string }) => masterApi.resetUserPassword(vars.id, vars.password),
         'master-users'
-    );
-
-export const usePurgeAuditLogs = () =>
-    useMutate(
-        (vars: { days: number }) => masterApi.purgeAuditLogs(vars.days),
-        'audit-logs'
     );

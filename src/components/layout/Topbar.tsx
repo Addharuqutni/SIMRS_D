@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Menu, Search, Bell, Sun, Moon, ChevronRight, LogOut } from 'lucide-react';
-import { useSession, signOut } from '../../lib/auth-client';
+import { Menu, Bell, Sun, Moon, ChevronRight, LogOut } from 'lucide-react';
+import { signOut } from '../../lib/auth-client';
+import { useCurrentUser } from '../auth/SessionProvider';
+import { breadcrumbFor } from './nav';
 import { useUnreadCount } from '../../hooks/useNotification';
 import styles from './layout.module.css';
 
@@ -17,30 +19,6 @@ interface TopbarProps {
 }
 
 const THEME_STORAGE_KEY = 'theme';
-
-const routeLabels: Record<string, string> = {
-    '/dashboard': 'Dashboard',
-    '/notifikasi': 'Notifikasi',
-    '/registrasi': 'Registrasi',
-    '/sep': 'SEP & VClaim',
-    '/jadwal-dokter': 'Jadwal Dokter',
-    '/antrean': 'Antrean',
-    '/rawat-jalan': 'Rawat Jalan',
-    '/rawat-inap': 'Rawat Inap',
-    '/igd': 'IGD',
-    '/rekam-medis': 'Rekam Medis',
-    '/laboratorium': 'Laboratorium',
-    '/radiologi': 'Radiologi',
-    '/farmasi/resep': 'Resep & Dispensing',
-    '/farmasi/stok': 'Stok Obat',
-    '/farmasi/alert': 'Alert Expired',
-    '/billing': 'Billing / Kasir',
-    '/klaim-bpjs': 'Klaim BPJS',
-    '/laporan-keuangan': 'Laporan Keuangan',
-    '/users': 'Manajemen User',
-    '/master-data': 'Master Data',
-    '/konfigurasi': 'Konfigurasi',
-};
 
 function readStoredTheme(): boolean {
     try {
@@ -62,8 +40,9 @@ function applyTheme(dark: boolean) {
 export function Topbar({ onToggleSidebar, darkMode, onToggleDarkMode }: TopbarProps) {
     const location = useLocation();
     const navigate = useNavigate();
-    const { data: session } = useSession();
+    const { user } = useCurrentUser();
     const { data: unreadCount = 0 } = useUnreadCount();
+    const crumb = breadcrumbFor(location.pathname);
 
     const [internalDark, setInternalDark] = useState(readStoredTheme);
     const isDark = darkMode ?? internalDark;
@@ -91,23 +70,13 @@ export function Topbar({ onToggleSidebar, darkMode, onToggleDarkMode }: TopbarPr
         setInternalDark(next);
     };
 
-    const getPageTitle = () => {
-        const path = location.pathname;
-        for (const [route, label] of Object.entries(routeLabels)) {
-            if (path === route || path.startsWith(route + '/')) {
-                return label;
-            }
-        }
-        return 'Dashboard';
-    };
-
     const handleLogout = async () => {
         await signOut();
         navigate('/login', { replace: true });
     };
 
-    const userName = session?.user?.name || 'User';
-    const userRole = ((session?.user as Record<string, unknown>)?.role as string | undefined) || 'user';
+    const userName = user?.name || 'User';
+    const userRole = user?.role || 'user';
     const initials = userName.substring(0, 2).toUpperCase();
 
     return (
@@ -118,18 +87,15 @@ export function Topbar({ onToggleSidebar, darkMode, onToggleDarkMode }: TopbarPr
                 </button>
                 <div className={styles.topbarBreadcrumb}>
                     <span>SIMRS</span>
+                    {crumb && (
+                        <>
+                            <ChevronRight size={14} />
+                            <span>{crumb.group}</span>
+                        </>
+                    )}
                     <ChevronRight size={14} />
-                    <span>{getPageTitle()}</span>
+                    <span>{crumb?.label ?? 'Dashboard'}</span>
                 </div>
-            </div>
-
-            <div className={styles.topbarSearch}>
-                <Search size={16} className={styles.topbarSearchIcon} />
-                <input
-                    type="text"
-                    className={styles.topbarSearchInput}
-                    placeholder="Cari pasien, obat, dokter..."
-                />
             </div>
 
             <div className={styles.topbarRight}>

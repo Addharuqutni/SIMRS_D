@@ -4,7 +4,7 @@ import { queryClient } from './lib/query-client';
 import { AppLayout } from './components/layout';
 import { LoginPage } from './pages/login/LoginPage';
 import { RoleGuard } from './components/auth/RoleGuard';
-import { useSession } from './lib/auth-client';
+import { SessionProvider, useCurrentUser } from './components/auth/SessionProvider';
 
 import React, { Suspense } from 'react';
 
@@ -22,8 +22,8 @@ const RawatInapList = React.lazy(() => import('./pages/rawat-inap/RawatInapList'
 const IgdList = React.lazy(() => import('./pages/igd/IgdList').then(m => ({ default: m.IgdList })));
 const ListDokter = React.lazy(() => import('./pages/pelayanan-medis/ListDokter').then(m => ({ default: m.ListDokter })));
 const RekamMedis = React.lazy(() => import('./pages/rekam-medis/RekamMedis').then(m => ({ default: m.RekamMedis })));
-const Laboratorium = React.lazy(() => import('./pages/penunjang/Laboratorium').then(m => ({ default: m.Laboratorium })));
-const Radiologi = React.lazy(() => import('./pages/penunjang/Radiologi').then(m => ({ default: m.Radiologi })));
+const Laboratorium = React.lazy(() => import('./pages/penunjang/PenunjangPage').then(m => ({ default: m.Laboratorium })));
+const Radiologi = React.lazy(() => import('./pages/penunjang/PenunjangPage').then(m => ({ default: m.Radiologi })));
 const FarmasiResep = React.lazy(() => import('./pages/farmasi/FarmasiResep').then(m => ({ default: m.FarmasiResep })));
 const FarmasiStok = React.lazy(() => import('./pages/farmasi/FarmasiStok').then(m => ({ default: m.FarmasiStok })));
 const AlertExpired = React.lazy(() => import('./pages/farmasi/AlertExpired').then(m => ({ default: m.AlertExpired })));
@@ -39,13 +39,13 @@ const AuditTrail = React.lazy(() => import('./pages/pengaturan/AuditTrail').then
 const DisplayBoard = React.lazy(() => import('./pages/display/DisplayBoard').then(m => ({ default: m.DisplayBoard })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { data: session, isPending } = useSession();
+  const { user, isPending } = useCurrentUser();
 
   if (isPending) {
     return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', color: '#64748b' }}>Memeriksa sesi...</div>;
   }
 
-  if (!session) {
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 
@@ -55,6 +55,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <SessionProvider>
       <BrowserRouter>
         <Suspense fallback={<div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', color: '#64748b' }}>Memuat sistem SIMRS...</div>}>
           <Routes>
@@ -121,6 +122,7 @@ function App() {
           </Routes>
         </Suspense>
       </BrowserRouter>
+      </SessionProvider>
     </QueryClientProvider>
   );
 }

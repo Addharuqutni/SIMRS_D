@@ -11,6 +11,10 @@ export const users = pgTable('users', {
     role: varchar('role', { length: 50 }).notNull().default('user'),
     unit: varchar('unit', { length: 100 }),
     status: varchar('status', { length: 20 }).notNull().default('aktif'),
+    // Required by better-auth's admin plugin (it validates these fields on every create/update).
+    banned: boolean('banned').default(false),
+    banReason: text('banReason'),
+    banExpires: timestamp('banExpires'),
 });
 
 export const sessions = pgTable('sessions', {
@@ -22,6 +26,8 @@ export const sessions = pgTable('sessions', {
     ipAddress: text('ipAddress'),
     userAgent: text('userAgent'),
     userId: text('userId').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    // Set by the admin plugin when a Superadmin impersonates this session.
+    impersonatedBy: text('impersonatedBy'),
 });
 
 export const accounts = pgTable('accounts', {

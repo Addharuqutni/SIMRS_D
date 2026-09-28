@@ -1,5 +1,5 @@
 import { api } from '../axios';
-import type { AxiosResponse } from 'axios';
+import type { Page, PageQuery } from '../../../shared/page';
 
 /** Mirrors the `notifications` table (server/src/db/schemas/notify.ts). */
 export interface AppNotification {
@@ -18,20 +18,18 @@ export interface UnreadCount {
     count: number;
 }
 
+/** Server status dimension for the list: read vs unread. */
+export type NotificationStatus = 'baca' | 'belum_dibaca';
+
 export const notificationApi = {
-    getNotifications: (unread?: boolean) =>
-        api.get<AppNotification[]>('/notifications', { params: unread ? { unread: 'true' } : undefined })
-            .then((res: AxiosResponse<AppNotification[]>) => res.data),
+    list: (q: PageQuery) =>
+        api.get<Page<AppNotification>>('/notifications', { params: q }).then((res) => res.data),
     getUnreadCount: () =>
-        api.get<UnreadCount>('/notifications/unread-count')
-            .then((res: AxiosResponse<UnreadCount>) => res.data),
+        api.get<UnreadCount>('/notifications/unread-count').then((res) => res.data),
     markRead: (id: number) =>
-        api.put<AppNotification>(`/notifications/${id}/read`)
-            .then((res: AxiosResponse<AppNotification>) => res.data),
+        api.put<AppNotification>(`/notifications/${id}/read`).then((res) => res.data),
     markAllRead: () =>
-        api.put<{ updated: number }>('/notifications/read-all')
-            .then((res: AxiosResponse<{ updated: number }>) => res.data),
+        api.put<{ updated: number }>('/notifications/read-all').then((res) => res.data),
     deleteNotification: (id: number) =>
-        api.delete<{ deleted: number }>(`/notifications/${id}`)
-            .then((res: AxiosResponse<{ deleted: number }>) => res.data),
+        api.delete<{ deleted: number }>(`/notifications/${id}`).then((res) => res.data),
 };

@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { useList, useMutate } from '../lib/query';
+import { useMutate } from '../lib/query';
+import { useListQuery } from '../lib/list-query';
 import { notificationApi } from '../lib/api/notification';
 
-export const useNotifications = (unread = false) =>
-    useList('notifications', () => notificationApi.getNotifications(unread));
+/** Paged notification list; the list-query status tab maps to read/unread. */
+export const useNotifications = () =>
+    useListQuery('notifications', (q) => notificationApi.list(q), { limit: 20 });
 
 // Polled by the Topbar badge; mutations below invalidate the same key.
 export const useUnreadCount = () =>

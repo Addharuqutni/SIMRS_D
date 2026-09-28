@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { TriangleAlert, CircleHelp, CircleCheck, Check, X, Info } from 'lucide-react';
 import styles from './ui.module.css';
+import { LIFECYCLES, type LifecycleKind } from '../../../shared/status';
 
 export { Printable } from './Printable';
 export { QRCode } from './QRCode';
@@ -46,6 +47,12 @@ export function StatusBadge({ variant, children, dot = true }: StatusBadgeProps)
             {children}
         </span>
     );
+}
+
+/** Badge for a domain status; label and colour come from shared/status. Unknown values render raw. */
+export function LifecycleBadge({ kind, status }: { kind: LifecycleKind; status: string }) {
+    const { label, variant } = LIFECYCLES[kind].badge(status);
+    return <StatusBadge variant={variant}>{label}</StatusBadge>;
 }
 
 /* ========== Card ========== */
@@ -174,7 +181,9 @@ interface PaginationProps {
 }
 
 export function Pagination({ currentPage, totalPages, totalItems, onPageChange }: PaginationProps) {
-    const pages = Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1);
+    // Show up to 5 page buttons centred on the current page.
+    const start = Math.max(1, Math.min(currentPage - 2, totalPages - 4));
+    const pages = Array.from({ length: Math.min(totalPages, 5) }, (_, i) => start + i);
 
     return (
         <div className={styles.pagination}>
@@ -198,11 +207,11 @@ export function Pagination({ currentPage, totalPages, totalItems, onPageChange }
                         {p}
                     </button>
                 ))}
-                {totalPages > 5 && <span style={{ padding: '0 4px', color: 'var(--text-muted)' }}>...</span>}
+                {start + 4 < totalPages && <span style={{ padding: '0 4px', color: 'var(--text-muted)' }}>...</span>}
                 <button
                     className={styles.pageBtn}
                     onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
+                    disabled={currentPage >= totalPages}
                 >
                     ›
                 </button>

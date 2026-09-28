@@ -39,6 +39,29 @@ app.use(helmet());
 // Performance: Gzip/Brotli compression for JSON/responses
 app.use(compression());
 
+// CORS — allow frontend origin with credentials (cookies).
+// Registered BEFORE the rate limiters so their 429 responses still carry the
+// CORS headers; otherwise a throttled browser request surfaces as an opaque
+// network/CORS failure instead of a readable rate-limit message.
+const isProduction = process.env.NODE_ENV === 'production';
+const allowedOrigins = [...frontendUrls, ...devOrigins];
+app.use(cors({
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            if (isProduction) {
+                callback(new Error('Not allowed by CORS'));
+            } else {
+                callback(null, true);
+            }
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 // Security: Rate Limiting against Bruteforce/DDoS (100 req per 15 minutes per IP)
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -61,26 +84,6 @@ const authLimiter = rateLimit({
     skipSuccessfulRequests: true,
 });
 app.use('/api/auth', authLimiter);
-
-// CORS — allow frontend origin with credentials (cookies)
-const isProduction = process.env.NODE_ENV === 'production';
-const allowedOrigins = [...frontendUrls, ...devOrigins];
-app.use(cors({
-    origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            if (isProduction) {
-                callback(new Error('Not allowed by CORS'));
-            } else {
-                callback(null, true);
-            }
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-}));
 
 // Security: request size cap — JSON/urlencoded bodies limited to 1MB
 // (file uploads bypass this via multer's own 5MB PDF check)

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck, Trash2, Clock, AlertTriangle, FileText, Users, Package } from 'lucide-react';
-import { Button, StatusBadge, FilterTabs, Card, ConfirmDialog, showToast } from '../../components/ui';
+import { Button, StatusBadge, FilterTabs, Card, Pagination, ConfirmDialog, showToast } from '../../components/ui';
+import { errorMessage } from '../../lib/api-error';
 import { useNotifications, useUnreadCount, useMarkNotificationRead, useMarkAllNotificationsRead, useDeleteNotification, useClearNotifications } from '../../hooks/useNotification';
 import type { AppNotification } from '../../lib/api/notification';
 import styles from '../registrasi/registrasi.module.css';
@@ -59,37 +60,31 @@ const formatWaktu = (iso: string): string => {
 
 export function NotifikasiPage() {
     const navigate = useNavigate();
-    const { data: notifs = [], isLoading } = useNotifications();
+    const list = useNotifications();
+    const notifs = list.rows;
     const { data: unreadCount = 0 } = useUnreadCount();
     const markRead = useMarkNotificationRead();
     const markAll = useMarkAllNotificationsRead();
     const deleteOne = useDeleteNotification();
     const clearAllMut = useClearNotifications();
 
-    const [filter, setFilter] = useState('semua');
     const [clearOpen, setClearOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<AppNotification | null>(null);
 
     const kategoriOf = (n: AppNotification) => toKategori(n.linkUrl);
     const tipeOf = (n: AppNotification) => toTipe(n.type);
 
-    const filtered = notifs.filter(n => {
-        if (filter === 'belum-baca') return !n.isRead;
-        if (filter === 'semua') return true;
-        return kategoriOf(n) === filter;
-    });
-
     const markAllRead = () => {
         markAll.mutate(undefined, {
             onSuccess: () => showToast('Semua notifikasi ditandai sudah dibaca', 'success'),
-            onError: () => showToast('Gagal menandai notifikasi', 'danger'),
+            onError: (err) => showToast(errorMessage(err, 'Gagal menandai notifikasi'), 'danger'),
         });
     };
 
     const openNotif = (notif: AppNotification) => {
         if (!notif.isRead) {
             markRead.mutate(notif.id, {
-                onError: () => showToast('Gagal menandai notifikasi', 'danger'),
+                onError: (err) => showToast(errorMessage(err, 'Gagal menandai notifikasi'), 'danger'),
             });
         }
         if (notif.linkUrl) navigate(notif.linkUrl);
@@ -101,14 +96,14 @@ export function NotifikasiPage() {
         if (!target) return;
         deleteOne.mutate(target.id, {
             onSuccess: () => showToast('Notifikasi dihapus', 'info'),
-            onError: () => showToast('Gagal menghapus notifikasi', 'danger'),
+            onError: (err) => showToast(errorMessage(err, 'Gagal menghapus notifikasi'), 'danger'),
         });
     };
 
     const clearAll = () => {
         clearAllMut.mutate(notifs.map(n => n.id), {
             onSuccess: () => showToast('Semua notifikasi telah dihapus', 'success'),
-            onError: () => showToast('Gagal menghapus notifikasi', 'danger'),
+            onError: (err) => showToast(errorMessage(err, 'Gagal menghapus notifikasi'), 'danger'),
         });
     };
 
@@ -157,30 +152,31 @@ export function NotifikasiPage() {
             <div className={styles.toolbar}>
                 <FilterTabs
                     tabs={[
-                        { label: 'Semua', value: 'semua', count: notifs.length },
-                        { label: 'Belum Dibaca', value: 'belum-baca', count: unreadCount },
-                        { label: 'Pasien', value: 'pasien', count: notifs.filter(n => kategoriOf(n) === 'pasien').length },
-                        { label: 'Farmasi', value: 'farmasi', count: notifs.filter(n => kategoriOf(n) === 'farmasi').length },
-                        { label: 'Keuangan', value: 'keuangan', count: notifs.filter(n => kategoriOf(n) === 'keuangan').length },
-                        { label: 'Sistem', value: 'sistem', count: notifs.filter(n => kategoriOf(n) === 'sistem').length },
+                        { label: 'Semua', value: 'semua', count: list.totalAll },
+                        { label: 'Belum Dibaca', value: 'belum_dibaca', count: list.counts.belum_dibaca ?? 0 },
+                        { label: 'Sudah Dibaca', value: 'baca', count: list.counts.baca ?? 0 },
                     ]}
-                    active={filter} onChange={setFilter}
+                    active={list.status} onChange={list.setStatus}
                 />
             </div>
 
             {/* Notification List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {isLoading ? (
+                {list.isLoading ? (
                     <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
                         <div style={{ fontSize: '14px', fontWeight: 600 }}>Memuat notifikasi...</div>
                     </div>
-                ) : filtered.length === 0 ? (
+                ) : list.isError ? (
+                    <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--danger)' }}>
+                        <div style={{ fontSize: '14px', fontWeight: 600 }}>Gagal memuat notifikasi</div>
+                    </div>
+                ) : notifs.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
                         <Bell size={40} style={{ marginBottom: 16, opacity: 0.3 }} />
                         <div style={{ fontSize: '16px', fontWeight: 600 }}>Tidak ada notifikasi</div>
                         <div style={{ fontSize: '13px', marginTop: 4 }}>Semua notifikasi telah dibaca atau dihapus</div>
                     </div>
-                ) : filtered.map(notif => {
+                ) : notifs.map(notif => {
                     const tipe = tipeOf(notif);
                     return (
                         <div key={notif.id} style={{
@@ -222,6 +218,10 @@ export function NotifikasiPage() {
                     );
                 })}
             </div>
+
+            {list.paginationProps.totalPages > 1 && (
+                <Pagination {...list.paginationProps} />
+            )}
 
             <ConfirmDialog open={clearOpen} onClose={() => setClearOpen(false)} onConfirm={clearAll}
                 title="Hapus Semua Notifikasi?" message="Semua notifikasi akan dihapus secara permanen."

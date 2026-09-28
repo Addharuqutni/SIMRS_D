@@ -34,10 +34,14 @@ const getClientIp = (req: Request): string => {
  *
  * Mount AFTER express.json() so req.body is parsed, e.g. app.use(auditLog).
  * The insert is deferred to the response 'finish' event so requireAuth (which
- * runs per-route, later) has populated req.user by then.
+ * runs per-route, later) has populated req.user by then — and so the recorded
+ * status code is the one actually sent.
+ *
+ * better-auth is mounted before this middleware (see server/src/index.ts), so
+ * /api/auth requests never reach it and need no path guard here.
  */
 export const auditLog = (req: Request, res: Response, next: NextFunction) => {
-    if (!AUDITED_METHODS.includes(req.method) || req.path.startsWith('/api/auth')) {
+    if (!AUDITED_METHODS.includes(req.method)) {
         return next();
     }
 
@@ -51,6 +55,7 @@ export const auditLog = (req: Request, res: Response, next: NextFunction) => {
             userName: (req.user?.name ?? '-').slice(0, 200),
             method: req.method,
             path: req.originalUrl || req.url,
+            statusCode: res.statusCode,
             body,
             ip: getClientIp(req).slice(0, 64),
         }).catch((err: unknown) => {

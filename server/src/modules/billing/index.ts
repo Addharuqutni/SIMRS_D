@@ -1,226 +1,86 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { db } from '../../db';
 import { billings, billingItems, transactions } from '../../db/schemas/billing';
 import { visits, patients } from '../../db/schemas/patient';
-import { prescriptions, prescriptionItems } from '../../db/schemas/services';
-import { labOrders, radiologyOrders, rawatInapAdmisi } from '../../db/schemas/clinical';
-import { medicines } from '../../db/schemas/inventory';
-import { eq, desc } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
 import { requireAuth, requireRole } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/error';
-import { ROLE_GROUPS } from '../../utils/roles';
-import { nanoid } from 'nanoid';
-import { getRoomTariffs } from '../settings';
+import { validate } from '../../middleware/validate';
+import { countsByStatus, readPageParams, toPage } from '../../utils/pagination';
+import { notFound } from '../../utils/domain-error';
+import { finalize, pay } from './ledger';
 
 const router = Router();
 
-// GET all billings
-router.get('/', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req, res) => {
-    const query = await db.select({
-        id: billings.id,
-        noBilling: billings.noBilling,
-        visitId: billings.visitId,
-        total: billings.total,
-        status: billings.status,
-        waktuFinalisasi: billings.waktuFinalisasi,
-        waktuBayar: billings.waktuBayar,
-        metodePembayaran: billings.metodePembayaran,
-        createdAt: billings.createdAt,
-        patientName: patients.nama,
-        rm: patients.rm,
-    })
-        .from(billings)
-        .leftJoin(visits, eq(billings.visitId, visits.id))
-        .leftJoin(patients, eq(visits.patientId, patients.id))
-        .orderBy(desc(billings.createdAt));
+const listColumns = {
+    id: billings.id,
+    noBilling: billings.noBilling,
+    visitId: billings.visitId,
+    total: billings.total,
+    status: billings.status,
+    waktuFinalisasi: billings.waktuFinalisasi,
+    waktuBayar: billings.waktuBayar,
+    metodePembayaran: billings.metodePembayaran,
+    createdAt: billings.createdAt,
+    patientName: patients.nama,
+    rm: patients.rm,
+    jaminan: visits.jaminan,
+    poli: visits.poliId,
+};
 
-    res.json(query);
+// GET ledger transactions for Laporan Keuangan — static path, must precede /:id
+router.get('/transactions', requireAuth, requireRole('billing'), asyncHandler(async (_req, res) => {
+    res.json(await db.select().from(transactions).orderBy(desc(transactions.tanggal)));
 }));
 
-// GET specific billing detail
-router.get('/:id', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const bill = await db.select({
-        id: billings.id,
-        noBilling: billings.noBilling,
-        visitId: billings.visitId,
-        total: billings.total,
-        status: billings.status,
-        patientName: patients.nama,
-        rm: patients.rm,
-    })
-        .from(billings)
+// GET billings — paginated, search by patient / RM / no billing, per-status counts
+router.get('/', requireAuth, requireRole('billing'), asyncHandler(async (req, res) => {
+    const p = readPageParams(req);
+    const search: SQL | undefined = p.q
+        ? or(ilike(patients.nama, `%${p.q}%`), ilike(patients.rm, `%${p.q}%`), ilike(billings.noBilling, `%${p.q}%`))
+        : undefined;
+    const where = and(search, p.status ? eq(billings.status, p.status) : undefined);
+    const [rows, statusRows] = await Promise.all([
+        db.select(listColumns).from(billings)
+            .leftJoin(visits, eq(billings.visitId, visits.id))
+            .leftJoin(patients, eq(visits.patientId, patients.id))
+            .where(where).orderBy(desc(billings.createdAt)).limit(p.limit).offset(p.offset),
+        db.select({ status: billings.status, n: count() }).from(billings)
+            .leftJoin(visits, eq(billings.visitId, visits.id))
+            .leftJoin(patients, eq(visits.patientId, patients.id))
+            .where(search).groupBy(billings.status),
+    ]);
+    const counts = countsByStatus(statusRows);
+    const total = p.status ? (counts[p.status] ?? 0) : Object.values(counts).reduce((a, b) => a + b, 0);
+    res.json(toPage(rows, total, p, counts));
+}));
+
+// GET billing detail with items
+router.get('/:id', requireAuth, requireRole('billing'), asyncHandler(async (req, res) => {
+    const [bill] = await db.select(listColumns).from(billings)
         .leftJoin(visits, eq(billings.visitId, visits.id))
         .leftJoin(patients, eq(visits.patientId, patients.id))
-        .where(eq(billings.id, id))
+        .where(eq(billings.id, req.params.id))
         .limit(1);
+    if (!bill) throw notFound('Billing');
 
-    if (!bill.length) return res.status(404).json({ error: 'Billing not found' });
-
-    const items = await db.select().from(billingItems).where(eq(billingItems.billingId, id));
-    res.json({ ...bill[0], items });
+    const items = await db.select().from(billingItems).where(eq(billingItems.billingId, bill.id)).orderBy(billingItems.createdAt);
+    res.json({ ...bill, items });
 }));
 
-// POST auto-generate billing from a highly structured visit
-router.post('/visit/:visitId/finalize', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req, res) => {
-    const { visitId } = req.params;
-
-    // 1. Check if billing already exists
-    const existing = await db.select().from(billings).where(eq(billings.visitId, visitId)).limit(1);
-    if (existing.length) {
-        return res.status(400).json({ error: 'Billing already generated for this visit' });
-    }
-
-    const visitData = await db.select().from(visits).where(eq(visits.id, visitId)).limit(1);
-    if (!visitData.length) return res.status(404).json({ error: 'Visit not found' });
-
-    const billId = nanoid();
-    const noBilling = `INV-${new Date().getFullYear()}${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const itemsToInsert: any[] = [];
-    let grandTotal = 0;
-
-    // A. Jasa Konsultasi Poli/Visit
-    itemsToInsert.push({
-        id: nanoid(),
-        billingId: billId,
-        kategori: 'Poli',
-        namaItem: 'Konsultasi Dokter Spesialis',
-        harga: 150000,
-        jumlah: 1,
-        subtotal: 150000
-    });
-    grandTotal += 150000;
-
-    // B. Farmasi Prescriptions
-    const pList = await db.select().from(prescriptions).where(eq(prescriptions.visitId, visitId));
-    for (const presc of pList) {
-        const pItems = await db.select().from(prescriptionItems).where(eq(prescriptionItems.prescriptionId, presc.id));
-        for (const pi of pItems) {
-            // Get harga jual
-            const med = await db.select().from(medicines).where(eq(medicines.id, parseInt(pi.obatId))).limit(1);
-            const harga = med.length ? med[0].hargaJual : 5000; // fallback 5000
-            const sub = harga * pi.jumlah;
-            itemsToInsert.push({
-                id: nanoid(),
-                billingId: billId,
-                kategori: 'Farmasi',
-                namaItem: `Resep: ${med.length ? med[0].nama : pi.obatId}`,
-                harga,
-                jumlah: pi.jumlah,
-                subtotal: sub
-            });
-            grandTotal += sub;
-        }
-    }
-
-    // C. Laboratorium
-    const lList = await db.select().from(labOrders).where(eq(labOrders.visitId, visitId));
-    for (const lab of lList) {
-        itemsToInsert.push({
-            id: nanoid(),
-            billingId: billId,
-            kategori: 'Laboratorium',
-            namaItem: `Lab: ${lab.jenisPemeriksaan}`,
-            harga: 100000,
-            jumlah: 1,
-            subtotal: 100000
-        });
-        grandTotal += 100000;
-    }
-
-    // D. Radiologi
-    const rList = await db.select().from(radiologyOrders).where(eq(radiologyOrders.visitId, visitId));
-    for (const rad of rList) {
-        itemsToInsert.push({
-            id: nanoid(),
-            billingId: billId,
-            kategori: 'Radiologi',
-            namaItem: `Rad: ${rad.jenisPemeriksaan}`,
-            harga: 250000,
-            jumlah: 1,
-            subtotal: 250000
-        });
-        grandTotal += 250000;
-    }
-
-    // E. Kamar rawat inap (hanya untuk kunjungan rawat inap yang tercatat di admisi)
-    if (visitData[0].tipeKunjungan === 'rawat_inap') {
-        const admisi = await db.select().from(rawatInapAdmisi).where(eq(rawatInapAdmisi.visitId, visitId)).limit(1);
-        if (admisi.length) {
-            // Tarif kamar dibaca dari settings (key tarifKamar); fallback ke DEFAULT_ROOM_TARIFF
-            // bila belum diatur atau JSON-nya invalid.
-            const TARIF_KAMAR = await getRoomTariffs();
-            const tarifPerHari = TARIF_KAMAR[admisi[0].kelas] ?? 350000;
-
-            const MS_PER_DAY = 24 * 60 * 60 * 1000;
-            const days = Math.max(1, Math.ceil((Date.now() - new Date(admisi[0].waktuMasuk).getTime()) / MS_PER_DAY));
-            const sub = tarifPerHari * days;
-
-            itemsToInsert.push({
-                id: nanoid(),
-                billingId: billId,
-                kategori: 'Rawat Inap',
-                namaItem: `Kamar ${admisi[0].ruanganId} (${admisi[0].kelas}) x ${days} hari`,
-                harga: tarifPerHari,
-                jumlah: days,
-                subtotal: sub
-            });
-            grandTotal += sub;
-        }
-        // No admisi row despite tipeKunjungan rawat_inap — skip room charge silently.
-    }
-
-    // 2. Insert Billing Record
-    const newBill = await db.insert(billings).values({
-        id: billId,
-        visitId,
-        noBilling,
-        total: grandTotal,
-        status: 'finalized',
-        waktuFinalisasi: new Date()
-    }).returning();
-
-    // 3. Insert Items
-    if (itemsToInsert.length > 0) {
-        await db.insert(billingItems).values(itemsToInsert);
-    }
-
-    res.status(201).json(newBill[0]);
+// POST finalize the Kunjungan's bill — totals what services already charged
+router.post('/visit/:visitId/finalize', requireAuth, requireRole('billing'), asyncHandler(async (req, res) => {
+    res.json(await finalize(db, req.params.visitId));
 }));
 
-// PUT pay billing
-router.put('/:id/pay', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const { metodePembayaran } = req.body;
+const paySchema = z.object({
+    body: z.object({ metodePembayaran: z.enum(['tunai', 'debit', 'transfer', 'qris', 'bpjs']) }),
+});
 
-    const updated = await db.update(billings)
-        .set({
-            status: 'paid',
-            metodePembayaran,
-            waktuBayar: new Date()
-        })
-        .where(eq(billings.id, id))
-        .returning();
-
-    if (!updated.length) return res.status(404).json({ error: 'Billing not found' });
-
-    // Record income transaction
-    await db.insert(transactions).values({
-        id: nanoid(),
-        keterangan: `Pembayaran ${updated[0].noBilling}`,
-        kategori: 'Pendapatan Medis',
-        jenis: 'pendapatan',
-        jumlah: updated[0].total
-    });
-
-    res.json(updated[0]);
-}));
-
-// GET all transactions for Laporan Keuangan
-router.get('/transactions', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req, res) => {
-    const query = await db.select().from(transactions).orderBy(desc(transactions.tanggal));
-    res.json(query);
+// PUT settle a finalized bill
+router.put('/:id/pay', requireAuth, requireRole('billing'), validate(paySchema), asyncHandler(async (req, res) => {
+    res.json(await pay(db, req.params.id, req.body.metodePembayaran, req.user?.id));
 }));
 
 export const billingRouter = router;

@@ -1,5 +1,5 @@
 import { api } from '../axios';
-import type { AxiosResponse } from 'axios';
+import type { Page, PageQuery } from '../../../shared/page';
 
 export interface BillingItem {
     id: string;
@@ -9,6 +9,7 @@ export interface BillingItem {
     harga: number;
     jumlah: number;
     subtotal: number;
+    createdAt: string;
 }
 
 export interface Billing {
@@ -19,12 +20,23 @@ export interface Billing {
     status: 'open' | 'finalized' | 'paid';
     waktuFinalisasi?: string;
     waktuBayar?: string;
-    metodePembayaran?: string;
+    metodePembayaran?: PaymentMethod;
     createdAt: string;
     patientName: string;
     rm: string;
+    jaminan: string;
+    poli: string;
     items?: BillingItem[];
 }
+
+export const PAYMENT_METHODS = [
+    { value: 'tunai', label: 'Tunai' },
+    { value: 'debit', label: 'Kartu Debit' },
+    { value: 'transfer', label: 'Transfer Bank' },
+    { value: 'qris', label: 'QRIS' },
+    { value: 'bpjs', label: 'BPJS (piutang klaim)' },
+] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number]['value'];
 
 export interface Transaction {
     id: string;
@@ -33,12 +45,13 @@ export interface Transaction {
     jenis: 'pendapatan' | 'piutang' | 'biaya';
     jumlah: number;
     tanggal: string;
+    referensi: string | null;
 }
 
 export const billingApi = {
-    getBillings: () => api.get<Billing[]>('/billing').then((res: AxiosResponse<Billing[]>) => res.data),
-    getBillingDetail: (id: string) => api.get<Billing>(`/billing/${id}`).then((res: AxiosResponse<Billing>) => res.data),
-    finalizeBilling: (visitId: string) => api.post<Billing>(`/billing/visit/${visitId}/finalize`).then((res: AxiosResponse<Billing>) => res.data),
-    payBilling: (id: string, metodePembayaran: string) => api.put<Billing>(`/billing/${id}/pay`, { metodePembayaran }).then((res: AxiosResponse<Billing>) => res.data),
-    getTransactions: () => api.get<Transaction[]>('/billing/transactions').then((res: AxiosResponse<Transaction[]>) => res.data),
+    list: (q: PageQuery) => api.get<Page<Billing>>('/billing', { params: q }).then((res) => res.data),
+    getBillingDetail: (id: string) => api.get<Billing>(`/billing/${id}`).then((res) => res.data),
+    finalizeBilling: (visitId: string) => api.post<Billing>(`/billing/visit/${visitId}/finalize`).then((res) => res.data),
+    payBilling: (id: string, metodePembayaran: PaymentMethod) => api.put<Billing>(`/billing/${id}/pay`, { metodePembayaran }).then((res) => res.data),
+    getTransactions: () => api.get<Transaction[]>('/billing/transactions').then((res) => res.data),
 };

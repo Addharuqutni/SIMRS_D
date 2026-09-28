@@ -1,94 +1,99 @@
 import { formatRp } from '../../lib/format';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Printer, CheckCircle, User, CreditCard } from 'lucide-react';
-import { Button, StatusBadge, ConfirmDialog, showToast, Printable } from '../../components/ui';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, CheckCircle, User, CreditCard } from 'lucide-react';
+import { Button, StatusBadge, ConfirmDialog, showToast, Printable, LifecycleBadge } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import styles from '../registrasi/registrasi.module.css';
-
-const billingItems = [
-    { kategori: 'Jasa Dokter', item: 'Konsultasi Sp. Penyakit Dalam', biaya: 150000 },
-    { kategori: 'Tindakan', item: 'Injeksi IV (99.29)', biaya: 50000 },
-    { kategori: 'Obat & BHP', item: 'Paracetamol 500mg x10', biaya: 35000 },
-    { kategori: 'Obat & BHP', item: 'Ambroxol 30mg x10', biaya: 25000 },
-    { kategori: 'Obat & BHP', item: 'Cetirizine 10mg x5', biaya: 25000 },
-    { kategori: 'Laboratorium', item: 'Hematologi Lengkap', biaya: 120000 },
-];
+import { useBillingDetail, useFinalizeBilling } from '../../hooks/useBilling';
+import { PAYMENT_METHODS } from '../../lib/api/billing';
+import { errorMessage } from '../../lib/api-error';
 
 export function BillingDetail() {
     const navigate = useNavigate();
-    const [finalized, setFinalized] = useState(false);
+    const { id = '' } = useParams();
+    const { data: bill, isLoading, error } = useBillingDetail(id);
+    const finalizeMutation = useFinalizeBilling();
     const [confirmOpen, setConfirmOpen] = useState(false);
 
-    const total = billingItems.reduce((acc, item) => acc + item.biaya, 0);
-    const bpjsCover = total;
-    const patientPay = 0;
-
-
-    const handleFinalize = () => {
-        setFinalized(true);
-        showToast('Billing berhasil difinalisasi ✅', 'success');
+    const handleFinalize = async () => {
+        if (!bill) return;
+        try {
+            await finalizeMutation.mutateAsync(bill.visitId);
+            showToast('Billing berhasil difinalisasi', 'success');
+        } catch (err) {
+            showToast(errorMessage(err, 'Gagal memfinalisasi billing'), 'danger');
+        } finally {
+            setConfirmOpen(false);
+        }
     };
+
+    const back = (
+        <button
+            onClick={() => navigate('/billing')}
+            style={{
+                display: 'inline-flex', alignItems: 'center', gap: '8px',
+                color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '16px',
+                background: 'none', border: 'none', cursor: 'pointer',
+            }}
+        >
+            <ArrowLeft size={16} /> Kembali ke Daftar Billing
+        </button>
+    );
+
+    if (isLoading) return <div className={styles.formPage}>{back}<p>Memuat tagihan...</p></div>;
+    if (!bill) return <div className={styles.formPage}>{back}<p style={{ color: 'var(--danger)' }}>{errorMessage(error, 'Tagihan tidak ditemukan')}</p></div>;
+
+    const metode = PAYMENT_METHODS.find((m) => m.value === bill.metodePembayaran)?.label;
 
     return (
         <div className={styles.formPage}>
-            <button
-                className={styles.backLink}
-                onClick={() => navigate('/billing')}
-                style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '8px',
-                    color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '16px',
-                    background: 'none', border: 'none', cursor: 'pointer',
-                }}
-            >
-                <ArrowLeft size={16} /> Kembali ke Daftar Billing
-            </button>
+            {back}
 
             <div className={styles.pageHeader}>
-                <h1 className={styles.pageTitle}>Billing Pasien</h1>
-                <StatusBadge variant={finalized ? 'success' : 'info'}>
-                    {finalized ? '✅ Difinalisasi' : 'BPJS Kesehatan'}
-                </StatusBadge>
+                <h1 className={styles.pageTitle}>Billing {bill.noBilling}</h1>
+                <LifecycleBadge kind="billing" status={bill.status} />
             </div>
 
-            {/* Main Wrapping for Printing */}
-            <Printable title={`Kuitansi ${finalized ? 'Final' : 'Draf'} - Ahmad Sudrajat`} buttonText="Cetak Kwitansi">
-                {/* Patient Info */}
+            <Printable title={`Kuitansi ${bill.noBilling} - ${bill.patientName}`} buttonText="Cetak Kwitansi">
                 <div className={styles.formSection}>
                     <h3 className={styles.formSectionTitle}><User size={18} /> Informasi Pasien</h3>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', fontSize: '14px' }}>
                         <div>
                             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Nama Pasien</div>
-                            <div style={{ fontWeight: 600 }}>Ahmad Sudrajat</div>
+                            <div style={{ fontWeight: 600 }}>{bill.patientName}</div>
                         </div>
                         <div>
                             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No. Rekam Medis</div>
-                            <div style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>001234</div>
+                            <div style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{bill.rm}</div>
                         </div>
                         <div>
                             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Jaminan</div>
-                            <div><StatusBadge variant="info">BPJS Aktif</StatusBadge></div>
+                            <div><StatusBadge variant="info" dot={false}>{bill.jaminan}</StatusBadge></div>
                         </div>
                     </div>
                 </div>
 
-                {/* Cost Breakdown */}
                 <div className={styles.formSection}>
                     <h3 className={styles.formSectionTitle}><CreditCard size={18} /> Rincian Biaya</h3>
                     <table className={uiStyles.table}>
                         <thead>
                             <tr>
-                                <th>Kategori</th>
-                                <th>Item</th>
-                                <th style={{ textAlign: 'right' }}>Biaya</th>
+                                <th>Kategori</th><th>Item</th>
+                                <th style={{ textAlign: 'right' }}>Harga</th><th style={{ textAlign: 'right' }}>Jml</th>
+                                <th style={{ textAlign: 'right' }}>Subtotal</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {billingItems.map((item, i) => (
-                                <tr key={i}>
+                            {(bill.items ?? []).length === 0 ? (
+                                <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada layanan yang ditagihkan</td></tr>
+                            ) : bill.items!.map((item) => (
+                                <tr key={item.id}>
                                     <td><StatusBadge variant="neutral" dot={false}>{item.kategori}</StatusBadge></td>
-                                    <td>{item.item}</td>
-                                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{formatRp(item.biaya)}</td>
+                                    <td>{item.namaItem}</td>
+                                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{formatRp(item.harga)}</td>
+                                    <td style={{ textAlign: 'right' }}>{item.jumlah}</td>
+                                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{formatRp(item.subtotal)}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -97,44 +102,24 @@ export function BillingDetail() {
                     <div style={{
                         marginTop: '20px', padding: '16px', background: 'var(--bg)',
                         borderRadius: 'var(--radius-md)', border: '1px solid var(--border)',
+                        display: 'flex', justifyContent: 'space-between', fontSize: '16px',
                     }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px' }}>
-                            <span style={{ color: 'var(--text-secondary)' }}>Total Biaya</span>
-                            <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{formatRp(total)}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px' }}>
-                            <span style={{ color: 'var(--success)' }}>Ditanggung BPJS</span>
-                            <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>({formatRp(bpjsCover)})</span>
-                        </div>
-                        <div style={{
-                            display: 'flex', justifyContent: 'space-between', paddingTop: '12px',
-                            borderTop: '2px solid var(--border)', fontSize: '16px',
-                        }}>
-                            <span style={{ fontWeight: 700 }}>Bayar Pasien</span>
-                            <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '20px' }}>{formatRp(patientPay)}</span>
-                        </div>
+                        <span style={{ fontWeight: 700 }}>Total{metode ? ` (dibayar: ${metode})` : ''}</span>
+                        <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '20px' }}>{formatRp(bill.total)}</span>
                     </div>
                 </div>
             </Printable>
 
-            {/* Actions */}
-            <div className={styles.formActions} style={{ marginTop: '24px' }}>
-                <Button variant="secondary" onClick={() => showToast('Mencetak kwitansi...', 'info')}>
-                    <Printer size={16} /> Cetak Kwitansi
-                </Button>
-                {!finalized ? (
-                    <Button variant="primary" onClick={() => setConfirmOpen(true)}>
+            {bill.status === 'open' && (
+                <div className={styles.formActions} style={{ marginTop: '24px' }}>
+                    <Button variant="primary" onClick={() => setConfirmOpen(true)} disabled={finalizeMutation.isPending}>
                         <CheckCircle size={16} /> Finalisasi Billing
                     </Button>
-                ) : (
-                    <Button variant="secondary" disabled>
-                        <CheckCircle size={16} /> Billing Selesai
-                    </Button>
-                )}
-            </div>
+                </div>
+            )}
 
             <ConfirmDialog open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={handleFinalize}
-                title="Finalisasi Billing?" message="Setelah difinalisasi, billing ini tidak dapat diubah lagi. Pastikan semua item sudah benar."
+                title="Finalisasi Billing?" message="Setelah difinalisasi, layanan baru tidak dapat ditagihkan ke kunjungan ini."
                 variant="warning" confirmLabel="Ya, Finalisasi" />
         </div>
     );

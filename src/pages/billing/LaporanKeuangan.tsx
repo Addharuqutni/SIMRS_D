@@ -1,223 +1,161 @@
 import { formatRp } from '../../lib/format';
-import { useState } from 'react';
-import { BarChart3, TrendingUp, TrendingDown, DollarSign, Download, Calendar, Eye, FileText } from 'lucide-react';
-import { Card, Button, SearchBar, FilterTabs, StatusBadge, Pagination, Modal, showToast } from '../../components/ui';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { BarChart3, TrendingUp, TrendingDown, DollarSign, Calendar, FileText, Download } from 'lucide-react';
+import { Card, Button, SearchBar, FilterTabs, StatusBadge, Pagination, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import styles from '../registrasi/registrasi.module.css';
 import { useTransactions } from '../../hooks/useBilling';
-import { api } from '../../lib/axios';
+import { reportsApi } from '../../lib/api/reports';
 import type { Transaction } from '../../lib/api/billing';
+import { downloadFile } from '../../lib/download';
+import { errorMessage } from '../../lib/api-error';
+
+const PAGE_SIZE = 20;
+const JENIS = {
+    pendapatan: { label: 'Pendapatan', variant: 'success', sign: '+', color: 'var(--success)' },
+    piutang: { label: 'Piutang', variant: 'warning', sign: '+', color: '#d97706' },
+    biaya: { label: 'Biaya', variant: 'danger', sign: '-', color: '#dc2626' },
+} as const;
+const BAR_COLORS = ['var(--primary)', 'var(--success)', 'var(--warning)', 'var(--info)', 'var(--text-muted)'];
+
+const monthLabel = (ym: string) =>
+    new Date(`${ym}-01T00:00:00`).toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
 
 export function LaporanKeuangan() {
     const { data: transaksi = [] } = useTransactions();
+    const { data: monthly = [] } = useQuery({ queryKey: ['finance-monthly'], queryFn: () => reportsApi.getFinanceMonthly(6) });
+    const { data: byCategory = [] } = useQuery({ queryKey: ['finance-by-category'], queryFn: reportsApi.getRevenueByCategory });
+
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState('semua');
-    const [periode, setPeriode] = useState('bulan-ini');
-    const [detailModal, setDetailModal] = useState<Transaction | null>(null);
+    const [page, setPage] = useState(1);
 
-    const exportRlCsv = async () => {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    const exportCsv = async (path: string, filename: string, label: string) => {
         try {
-            const res = await api.get('/reports/rl', {
-                params: { year, month, format: 'csv' },
-                responseType: 'blob',
-            });
-            const url = URL.createObjectURL(res.data);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `rl_${year}_${month}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            showToast(`Laporan RL ${month}/${year} berhasil diekspor`, 'success');
-        } catch {
-            showToast('Gagal mengekspor laporan RL', 'danger');
+            await downloadFile(path, filename, { year, month, format: 'csv' });
+            showToast(`${label} berhasil diekspor`, 'success');
+        } catch (err) {
+            showToast(errorMessage(err, `Gagal mengekspor ${label}`), 'danger');
         }
     };
 
+    const totals = useMemo(() => {
+        const t = { pendapatan: 0, piutang: 0, biaya: 0 };
+        for (const x of transaksi) t[x.jenis] += x.jumlah;
+        return t;
+    }, [transaksi]);
 
-    const exportRl2bCsv = async () => {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        try {
-            const res = await api.get('/reports/rl2b', {
-                params: { year, month, format: 'csv' },
-                responseType: 'blob',
-            });
-            const url = URL.createObjectURL(res.data);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `rl2b_${year}_${month}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            showToast(`Laporan RL 2b (Morbiditas) ${month}/${year} berhasil diekspor`, 'success');
-        } catch {
-            showToast('Gagal mengekspor laporan RL 2b', 'danger');
-        }
-    };
+    const needle = search.trim().toLowerCase();
+    const filtered = transaksi.filter((t: Transaction) =>
+        (filter === 'semua' || t.jenis === filter) &&
+        (needle === '' || t.keterangan.toLowerCase().includes(needle) || t.id.toLowerCase().includes(needle)));
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const countOf = (jenis: string) => transaksi.filter((t) => t.jenis === jenis).length;
 
-
-    const filtered = transaksi.filter((t: Transaction) => {
-        const matchSearch = search.trim() === '' ||
-            (t.keterangan?.toLowerCase().includes(search.toLowerCase()) || '') ||
-            (t.id?.toLowerCase().includes(search.toLowerCase()) || '');
-        const matchFilter = filter === 'semua' || t.jenis === filter;
-        return matchSearch && matchFilter;
-    });
-
-    const totalPendapatan = transaksi.filter((t: Transaction) => t.jenis === 'pendapatan').reduce((a: number, t: Transaction) => a + t.jumlah, 0);
-    const totalPiutang = transaksi.filter((t: Transaction) => t.jenis === 'piutang').reduce((a: number, t: Transaction) => a + t.jumlah, 0);
-    const totalBiaya = transaksi.filter((t: Transaction) => t.jenis === 'biaya').reduce((a: number, t: Transaction) => a + t.jumlah, 0);
+    const maxMonthly = Math.max(1, ...monthly.flatMap((m) => [m.pendapatan + m.piutang, m.biaya]));
+    const categoryTotal = byCategory.reduce((a, c) => a + c.total, 0);
 
     return (
         <div className={styles.page}>
             <div className={styles.pageHeader}>
                 <h1 className={styles.pageTitle}>Dashboard Akuntansi & Keuangan</h1>
                 <div style={{ display: 'flex', gap: '12px' }}>
-                    <select className={uiStyles.formSelect} value={periode} onChange={e => setPeriode(e.target.value)}
-                        style={{ width: 'auto', minWidth: '160px' }}>
-                        <option value="hari-ini">Hari Ini</option>
-                        <option value="minggu-ini">Minggu Ini</option>
-                        <option value="bulan-ini">Bulan Ini</option>
-                        <option value="kuartal-ini">Kuartal Ini</option>
-                        <option value="tahun-ini">Tahun Ini</option>
-                    </select>
-                    <Button variant="secondary" onClick={exportRlCsv}>
+                    <Button variant="secondary" onClick={() => exportCsv('/reports/rl', `rl_${year}_${month}.csv`, `Laporan RL ${month}/${year}`)}>
                         <FileText size={16} /> Export RL (CSV)
                     </Button>
-                    <Button variant="secondary" onClick={exportRl2bCsv}>
+                    <Button variant="secondary" onClick={() => exportCsv('/reports/rl2b', `rl2b_${year}_${month}.csv`, `Laporan RL 2b ${month}/${year}`)}>
                         <FileText size={16} /> Export RL 2b (CSV)
                     </Button>
-                    <Button variant="secondary" onClick={() => showToast('Mengekspor laporan ke Excel...', 'info')}>
-                        <Download size={16} /> Export (.xlsx)
+                    <Button variant="secondary" onClick={() => exportCsv('/reports/finance/export-csv', `jurnal_${year}_${month}.csv`, 'Jurnal transaksi 30 hari')}>
+                        <Download size={16} /> Export Jurnal (CSV)
                     </Button>
                 </div>
             </div>
 
-            {/* Summary Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '24px' }}>
-                <Card>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ background: '#f0fdf4', color: '#16a34a', padding: '16px', borderRadius: '16px' }}>
-                            <TrendingUp size={28} />
-                        </div>
-                        <div>
-                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Pendapatan</div>
-                            <div style={{ fontSize: '22px', fontWeight: 800 }}>{formatRp(totalPendapatan)}</div>
-                            <div style={{ fontSize: '12px', color: 'var(--success)', marginTop: '2px', fontWeight: 600 }}>↑ 12.5% vs bulan lalu</div>
-                        </div>
-                    </div>
-                </Card>
-                <Card>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ background: '#fffbeb', color: '#d97706', padding: '16px', borderRadius: '16px' }}>
-                            <DollarSign size={28} />
-                        </div>
-                        <div>
-                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Piutang BPJS / Asuransi</div>
-                            <div style={{ fontSize: '22px', fontWeight: 800 }}>{formatRp(totalPiutang)}</div>
-                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Belum tertagih</div>
-                        </div>
-                    </div>
-                </Card>
-                <Card>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ background: '#fef2f2', color: '#dc2626', padding: '16px', borderRadius: '16px' }}>
-                            <TrendingDown size={28} />
-                        </div>
-                        <div>
-                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Total Pengeluaran</div>
-                            <div style={{ fontSize: '22px', fontWeight: 800 }}>{formatRp(totalBiaya)}</div>
-                            <div style={{ fontSize: '12px', color: '#dc2626', marginTop: '2px', fontWeight: 600 }}>↑ 5.3% vs bulan lalu</div>
-                        </div>
-                    </div>
-                </Card>
-                <Card>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        <div style={{ background: 'var(--primary-100)', color: 'var(--primary)', padding: '16px', borderRadius: '16px' }}>
-                            <BarChart3 size={28} />
-                        </div>
-                        <div>
-                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Laba Bersih</div>
-                            <div style={{ fontSize: '22px', fontWeight: 800, color: totalPendapatan - totalBiaya > 0 ? 'var(--success)' : '#dc2626' }}>
-                                {formatRp(totalPendapatan - totalBiaya)}
+                {[
+                    { icon: <TrendingUp size={28} />, bg: '#f0fdf4', fg: '#16a34a', label: 'Total Pendapatan', value: totals.pendapatan, note: 'Pembayaran tunai/non-tunai' },
+                    { icon: <DollarSign size={28} />, bg: '#fffbeb', fg: '#d97706', label: 'Piutang BPJS / Asuransi', value: totals.piutang, note: 'Belum tertagih' },
+                    { icon: <TrendingDown size={28} />, bg: '#fef2f2', fg: '#dc2626', label: 'Total Pengeluaran', value: totals.biaya, note: 'Tercatat di jurnal' },
+                    { icon: <BarChart3 size={28} />, bg: 'var(--primary-100)', fg: 'var(--primary)', label: 'Laba Bersih', value: totals.pendapatan - totals.biaya, note: 'Pendapatan - Biaya' },
+                ].map((c) => (
+                    <Card key={c.label}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                            <div style={{ background: c.bg, color: c.fg, padding: '16px', borderRadius: '16px' }}>{c.icon}</div>
+                            <div>
+                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{c.label}</div>
+                                <div style={{ fontSize: '22px', fontWeight: 800 }}>{formatRp(c.value)}</div>
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>{c.note}</div>
                             </div>
-                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>Pendapatan - Biaya</div>
                         </div>
-                    </div>
-                </Card>
+                    </Card>
+                ))}
             </div>
 
-            {/* Charts Row */}
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                <Card title="Grafik Pendapatan vs Pengeluaran (YTD)" icon={<DollarSign size={18} />}>
+                <Card title="Pemasukan vs Pengeluaran (6 bulan)" icon={<DollarSign size={18} />}>
                     <div style={{ height: '200px', display: 'flex', alignItems: 'flex-end', gap: '8px', padding: '20px 0' }}>
-                        {['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun'].map((bulan, i) => {
-                            const heights = [65, 78, 72, 85, 90, 82];
-                            const biayaH = [45, 52, 55, 48, 50, 47];
-                            return (
-                                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                                    <div style={{ display: 'flex', gap: '3px', alignItems: 'flex-end', height: '150px' }}>
-                                        <div style={{ width: '16px', height: `${heights[i]}%`, background: 'var(--primary)', borderRadius: '4px 4px 0 0', opacity: i < 2 ? 1 : 0.3 }} />
-                                        <div style={{ width: '16px', height: `${biayaH[i]}%`, background: '#dc2626', borderRadius: '4px 4px 0 0', opacity: i < 2 ? 1 : 0.3 }} />
-                                    </div>
-                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{bulan}</span>
+                        {monthly.map((m) => (
+                            <div key={m.bulan} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}
+                                title={`Masuk ${formatRp(m.pendapatan + m.piutang)} · Keluar ${formatRp(m.biaya)}`}>
+                                <div style={{ display: 'flex', gap: '3px', alignItems: 'flex-end', height: '150px' }}>
+                                    <div style={{ width: '16px', height: `${((m.pendapatan + m.piutang) / maxMonthly) * 100}%`, background: 'var(--primary)', borderRadius: '4px 4px 0 0' }} />
+                                    <div style={{ width: '16px', height: `${(m.biaya / maxMonthly) * 100}%`, background: '#dc2626', borderRadius: '4px 4px 0 0' }} />
                                 </div>
-                            );
-                        })}
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{monthLabel(m.bulan)}</span>
+                            </div>
+                        ))}
                     </div>
                     <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '12px' }}>
-                        <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: 'var(--primary)', marginRight: 4 }} />Pendapatan</span>
+                        <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: 'var(--primary)', marginRight: 4 }} />Pendapatan + Piutang</span>
                         <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#dc2626', marginRight: 4 }} />Pengeluaran</span>
                     </div>
                 </Card>
 
-                <Card title="Proporsi Pendapatan" icon={<BarChart3 size={18} />}>
+                <Card title="Proporsi Pendapatan (tagihan lunas)" icon={<BarChart3 size={18} />}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '8px' }}>
-                        {[
-                            { unit: 'Farmasi', persen: 45, warna: 'var(--primary)' },
-                            { unit: 'Tindakan Medis', persen: 25, warna: 'var(--success)' },
-                            { unit: 'Laboratorium', persen: 15, warna: 'var(--warning)' },
-                            { unit: 'Kamar / Akomodasi', persen: 10, warna: 'var(--info)' },
-                            { unit: 'Lain-lain', persen: 5, warna: 'var(--text-muted)' },
-                        ].map((d, i) => (
-                            <div key={i}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                                    <span>{d.unit}</span>
-                                    <span style={{ fontWeight: 600 }}>{d.persen}%</span>
+                        {byCategory.length === 0 ? (
+                            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Belum ada tagihan lunas</div>
+                        ) : byCategory.map((d, i) => {
+                            const persen = categoryTotal ? Math.round((d.total / categoryTotal) * 100) : 0;
+                            return (
+                                <div key={d.kategori}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                                        <span>{d.kategori}</span>
+                                        <span style={{ fontWeight: 600 }}>{persen}%</span>
+                                    </div>
+                                    <div style={{ width: '100%', height: '8px', background: 'var(--bg)', borderRadius: '4px', overflow: 'hidden' }}>
+                                        <div style={{ width: `${persen}%`, height: '100%', background: BAR_COLORS[i % BAR_COLORS.length], borderRadius: '4px' }} />
+                                    </div>
                                 </div>
-                                <div style={{ width: '100%', height: '8px', background: 'var(--bg)', borderRadius: '4px', overflow: 'hidden' }}>
-                                    <div style={{ width: `${d.persen}%`, height: '100%', background: d.warna, borderRadius: '4px' }} />
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </Card>
             </div>
 
-            {/* Transaction Table */}
             <h2 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '16px' }}>
                 <FileText size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
                 Jurnal Transaksi
             </h2>
             <div className={styles.toolbar}>
                 <div className={styles.toolbarSearch}>
-                    <SearchBar placeholder="Cari transaksi..." value={search} onChange={setSearch} />
+                    <SearchBar placeholder="Cari transaksi..." value={search} onChange={(v) => { setSearch(v); setPage(1); }} />
                 </div>
                 <FilterTabs
                     tabs={[
                         { label: 'Semua', value: 'semua', count: transaksi.length },
-                        { label: 'Pendapatan', value: 'pendapatan', count: transaksi.filter((t: Transaction) => t.jenis === 'pendapatan').length },
-                        { label: 'Piutang', value: 'piutang', count: transaksi.filter((t: Transaction) => t.jenis === 'piutang').length },
-                        { label: 'Biaya', value: 'biaya', count: transaksi.filter((t: Transaction) => t.jenis === 'biaya').length },
+                        { label: 'Pendapatan', value: 'pendapatan', count: countOf('pendapatan') },
+                        { label: 'Piutang', value: 'piutang', count: countOf('piutang') },
+                        { label: 'Biaya', value: 'biaya', count: countOf('biaya') },
                     ]}
-                    active={filter} onChange={setFilter}
+                    active={filter} onChange={(v) => { setFilter(v); setPage(1); }}
                 />
             </div>
 
@@ -225,79 +163,32 @@ export function LaporanKeuangan() {
                 <table className={uiStyles.table}>
                     <thead>
                         <tr>
-                            <th>ID</th><th>Tanggal</th><th>Keterangan</th><th>Kategori</th>
-                            <th>Jenis</th><th style={{ textAlign: 'right' }}>Jumlah</th><th>Aksi</th>
+                            <th>Referensi</th><th>Tanggal</th><th>Keterangan</th><th>Kategori</th>
+                            <th>Jenis</th><th style={{ textAlign: 'right' }}>Jumlah</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {filtered.length === 0 ? (
-                            <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Tidak ada transaksi ditemukan</td></tr>
-                        ) : filtered.map((trx: Transaction, i: number) => (
-                            <tr key={i}>
-                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>{trx.id}</td>
-                                <td><Calendar size={12} style={{ display: 'inline', marginRight: 4, color: 'var(--text-muted)' }} />{new Date(trx.tanggal).toLocaleDateString('id-ID')}</td>
-                                <td style={{ maxWidth: '350px', whiteSpace: 'normal', fontSize: '13px' }}>{trx.keterangan}</td>
-                                <td><StatusBadge variant="neutral" dot={false}>{trx.kategori}</StatusBadge></td>
-                                <td>
-                                    <StatusBadge variant={trx.jenis === 'pendapatan' ? 'success' : trx.jenis === 'piutang' ? 'warning' : 'danger'}>
-                                        {trx.jenis === 'pendapatan' ? '↓ Pendapatan' : trx.jenis === 'piutang' ? '⏳ Piutang' : '↑ Biaya'}
-                                    </StatusBadge>
-                                </td>
-                                <td style={{
-                                    textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600,
-                                    color: trx.jenis === 'biaya' ? '#dc2626' : trx.jenis === 'pendapatan' ? 'var(--success)' : '#d97706'
-                                }}>
-                                    {trx.jenis === 'biaya' ? '-' : '+'}{formatRp(trx.jumlah)}
-                                </td>
-                                <td>
-                                    <Button variant="ghost" size="sm" title="Lihat Detail" style={{ color: 'var(--primary)' }}
-                                        onClick={() => setDetailModal(trx)}>
-                                        <Eye size={14} />
-                                    </Button>
-                                </td>
-                            </tr>
-                        ))}
+                        {pageRows.length === 0 ? (
+                            <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Tidak ada transaksi ditemukan</td></tr>
+                        ) : pageRows.map((trx) => {
+                            const j = JENIS[trx.jenis];
+                            return (
+                                <tr key={trx.id}>
+                                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>{trx.referensi ?? trx.id}</td>
+                                    <td><Calendar size={12} style={{ display: 'inline', marginRight: 4, color: 'var(--text-muted)' }} />{new Date(trx.tanggal).toLocaleDateString('id-ID')}</td>
+                                    <td style={{ maxWidth: '350px', whiteSpace: 'normal', fontSize: '13px' }}>{trx.keterangan}</td>
+                                    <td><StatusBadge variant="neutral" dot={false}>{trx.kategori}</StatusBadge></td>
+                                    <td><StatusBadge variant={j.variant}>{j.label}</StatusBadge></td>
+                                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: j.color }}>
+                                        {j.sign}{formatRp(trx.jumlah)}
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
-                <Pagination currentPage={1} totalPages={1} totalItems={filtered.length} onPageChange={() => { }} />
+                <Pagination currentPage={page} totalPages={totalPages} totalItems={filtered.length} onPageChange={setPage} />
             </div>
-
-            {/* Detail Modal */}
-            <Modal open={!!detailModal} onClose={() => setDetailModal(null)}
-                title={`Detail Transaksi — ${detailModal?.id}`} icon={<FileText size={20} />}>
-                {detailModal && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', padding: '12px', background: 'var(--bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '14px' }}>
-                            <div><strong style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)' }}>ID Transaksi</strong>{detailModal.id}</div>
-                            <div><strong style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)' }}>Tanggal</strong>{new Date(detailModal.tanggal).toLocaleDateString()}</div>
-                            <div><strong style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)' }}>Kategori</strong>{detailModal.kategori}</div>
-                            <div><strong style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)' }}>Jenis</strong>
-                                <StatusBadge variant={detailModal.jenis === 'pendapatan' ? 'success' : detailModal.jenis === 'piutang' ? 'warning' : 'danger'}>
-                                    {detailModal.jenis === 'pendapatan' ? 'Pendapatan' : detailModal.jenis === 'piutang' ? 'Piutang' : 'Biaya'}
-                                </StatusBadge>
-                            </div>
-                        </div>
-                        <div style={{ borderLeft: `4px solid ${detailModal.jenis === 'biaya' ? '#dc2626' : detailModal.jenis === 'pendapatan' ? 'var(--success)' : '#d97706'}`, paddingLeft: '16px' }}>
-                            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>Keterangan</div>
-                            <div style={{ fontSize: '14px', lineHeight: 1.6 }}>{detailModal.keterangan}</div>
-                        </div>
-                        <div style={{ textAlign: 'center', padding: '20px', background: 'var(--bg)', borderRadius: 'var(--radius-md)' }}>
-                            <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>Jumlah</div>
-                            <div style={{
-                                fontSize: '28px', fontWeight: 800, fontFamily: 'var(--font-mono)',
-                                color: detailModal.jenis === 'biaya' ? '#dc2626' : 'var(--success)'
-                            }}>
-                                {detailModal.jenis === 'biaya' ? '-' : '+'}{formatRp(detailModal.jumlah)}
-                            </div>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                            <Button variant="secondary" onClick={() => showToast('Mencetak bukti transaksi...', 'info')}>
-                                Cetak Bukti
-                            </Button>
-                        </div>
-                    </div>
-                )}
-            </Modal>
         </div>
     );
 }

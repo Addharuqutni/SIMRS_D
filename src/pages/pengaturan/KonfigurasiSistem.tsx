@@ -1,19 +1,71 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building, BedDouble, ShieldCheck, Activity, Save, Info } from 'lucide-react';
+import { Building, BedDouble, Activity, Save, Stethoscope } from 'lucide-react';
 import { Button, Card, StatusBadge, showToast } from '../../components/ui';
 import { uiStyles } from '../../components/ui';
 import { settingsApi } from '../../lib/api/settings';
+import { errorMessage } from '../../lib/api-error';
+import {
+    DEFAULT_ROOM_TARIFF, DEFAULT_SERVICE_TARIFF, KELAS_KAMAR, LAYANAN_KEYS, LAYANAN_LABEL, parseTariff,
+} from '../../../shared/tariff';
 import styles from '../registrasi/registrasi.module.css';
 
-// Must mirror DEFAULT_ROOM_TARIFF in server/src/modules/settings/index.ts.
-const KELAS_KAMAR = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'VIP', 'ICU', 'HCU'] as const;
-const DEFAULT_TARIF: Record<string, number> = {
-    'Kelas 1': 500000, 'Kelas 2': 350000, 'Kelas 3': 200000,
-    'VIP': 750000, 'HCU': 750000, 'ICU': 1000000,
-};
-
 const rupiah = (n: number) => new Intl.NumberFormat('id-ID').format(n);
+
+/** Editable tariff table for one settings key (JSON object stored as a string). */
+function TariffEditor({ title, icon, note, keys, labels, defaults, stored, onSave, saving }: {
+    title: string;
+    icon: React.ReactNode;
+    note: string;
+    keys: readonly string[];
+    labels?: Record<string, string>;
+    defaults: Record<string, number>;
+    stored: string | undefined;
+    onSave: (json: string) => void;
+    saving: boolean;
+}) {
+    const [values, setValues] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        const parsed = parseTariff(stored, defaults);
+        setValues(Object.fromEntries(keys.map((k) => [k, String(parsed[k])])));
+    }, [stored, defaults, keys]);
+
+    const save = () => {
+        const merged: Record<string, number> = { ...defaults };
+        for (const k of keys) {
+            const n = Number(values[k]);
+            if (values[k] !== '' && Number.isFinite(n) && n >= 0) merged[k] = Math.round(n);
+        }
+        onSave(JSON.stringify(merged));
+    };
+
+    return (
+        <Card title={title} icon={icon}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {keys.map((k) => (
+                    <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '10px 14px', background: 'var(--bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                        <div>
+                            <div style={{ fontWeight: 600, fontSize: '14px' }}>{labels?.[k] ?? k}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Default: Rp {rupiah(defaults[k])}</div>
+                        </div>
+                        <div className={uiStyles.formGroup} style={{ marginBottom: 0, width: '180px' }}>
+                            <input className={uiStyles.formInput} type="number" min={0} step={1000}
+                                value={values[k] ?? ''}
+                                onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} />
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>{note}</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px', marginTop: '16px', borderTop: '1px solid var(--border-light)' }}>
+                <Button variant="primary" onClick={save} disabled={saving}>
+                    <Save size={16} /> Simpan Tarif
+                </Button>
+            </div>
+        </Card>
+    );
+}
 
 export function KonfigurasiSistem() {
     const [activeTab, setActiveTab] = useState('profil');
@@ -21,8 +73,7 @@ export function KonfigurasiSistem() {
 
     const tabs = [
         { key: 'profil', label: 'Profil Rumah Sakit', icon: <Building size={16} /> },
-        { key: 'tarif', label: 'Tarif Kamar Rawat Inap', icon: <BedDouble size={16} /> },
-        { key: 'keamanan', label: 'Keamanan & Autentikasi', icon: <ShieldCheck size={16} /> },
+        { key: 'tarif', label: 'Tarif Layanan', icon: <BedDouble size={16} /> },
         { key: 'server', label: 'Info Sistem', icon: <Activity size={16} /> },
     ];
 
@@ -38,7 +89,6 @@ export function KonfigurasiSistem() {
     });
 
     const [profil, setProfil] = useState({ namaRS: '', alamatRS: '', jamLayanan: '' });
-    const [tarif, setTarif] = useState<Record<string, string>>({});
 
     // Sync form state once settings load.
     useEffect(() => {
@@ -48,13 +98,6 @@ export function KonfigurasiSistem() {
             alamatRS: settings.alamatRS ?? '-',
             jamLayanan: settings.jamLayanan ?? '24 Jam',
         });
-
-        let parsed: Record<string, number> = DEFAULT_TARIF;
-        try {
-            const raw = JSON.parse(settings.tarifKamar ?? 'null');
-            if (raw && typeof raw === 'object' && !Array.isArray(raw)) parsed = { ...DEFAULT_TARIF, ...raw };
-        } catch { /* invalid JSON — keep defaults */ }
-        setTarif(Object.fromEntries(KELAS_KAMAR.map((k) => [k, String(parsed[k] ?? DEFAULT_TARIF[k])])));
     }, [settings]);
 
     const saveMutation = useMutation({
@@ -63,7 +106,7 @@ export function KonfigurasiSistem() {
             showToast('Konfigurasi berhasil disimpan', 'success');
             queryClient.invalidateQueries({ queryKey: ['settings'] });
         },
-        onError: () => showToast('Gagal menyimpan konfigurasi', 'danger'),
+        onError: (err) => showToast(errorMessage(err, 'Gagal menyimpan konfigurasi'), 'danger'),
     });
 
     const handleSaveProfil = () => saveMutation.mutate({
@@ -71,18 +114,6 @@ export function KonfigurasiSistem() {
         alamatRS: profil.alamatRS.trim(),
         jamLayanan: profil.jamLayanan.trim(),
     });
-
-    const handleSaveTarif = () => {
-        // Merge over defaults so empty/invalid rows keep their current default.
-        const merged: Record<string, number> = { ...DEFAULT_TARIF };
-        for (const kelas of KELAS_KAMAR) {
-            const n = Number(tarif[kelas]);
-            if (Number.isFinite(n) && n >= 0) merged[kelas] = Math.round(n);
-        }
-        saveMutation.mutate({ tarifKamar: JSON.stringify(merged) });
-    };
-
-    const maxPercobaanLogin = settings?.maxPercobaanLogin ?? '20';
 
     return (
         <div className={styles.page}>
@@ -143,52 +174,24 @@ export function KonfigurasiSistem() {
                         </Card>
                     )}
 
-                    {activeTab === 'tarif' && (
-                        <Card title="Tarif Kamar Rawat Inap (per hari)" icon={<BedDouble size={18} />}>
-                            {isLoading ? <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Memuat pengaturan...</div> : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                        {KELAS_KAMAR.map(kelas => (
-                                            <div key={kelas} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '10px 14px', background: 'var(--bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-                                                <div>
-                                                    <div style={{ fontWeight: 600, fontSize: '14px' }}>{kelas}</div>
-                                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Default: Rp {rupiah(DEFAULT_TARIF[kelas])}</div>
-                                                </div>
-                                                <div className={uiStyles.formGroup} style={{ marginBottom: 0, width: '180px' }}>
-                                                    <input className={uiStyles.formInput} type="number" min={0} step={1000}
-                                                        value={tarif[kelas] ?? ''}
-                                                        onChange={(e) => setTarif(t => ({ ...t, [kelas]: e.target.value }))} />
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                                        Tarif ini dipakai saat finalisasi billing rawat inap. Nilai kosong kembali ke default.
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
-                                        <Button variant="primary" onClick={handleSaveTarif} disabled={saveMutation.isPending}>
-                                            <Save size={16} /> Simpan Tarif
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-                        </Card>
-                    )}
-
-                    {activeTab === 'keamanan' && (
-                        <Card title="Pengaturan Keamanan & Autentikasi" icon={<ShieldCheck size={18} />}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                <div className={uiStyles.formGroup} style={{ maxWidth: '360px' }}>
-                                    <label className={uiStyles.formLabel}>Max. Percobaan Login Gagal (sebelum lock)</label>
-                                    <input className={uiStyles.formInput} type="number" value={maxPercobaanLogin} disabled />
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 14px', background: 'var(--bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                    <Info size={16} style={{ flexShrink: 0, marginTop: 1, color: 'var(--primary)' }} />
-                                    <span>Diterapkan via rate limiter server — nilai ini hanya informasi dan tidak dapat diubah dari aplikasi.</span>
-                                </div>
-                            </div>
-                        </Card>
-                    )}
+                    {activeTab === 'tarif' && (isLoading ? (
+                        <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Memuat pengaturan...</div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                            <TariffEditor
+                                title="Tarif Layanan" icon={<Stethoscope size={18} />}
+                                note="Dipakai saat layanan diberikan (pendaftaran, order lab/radiologi). Tagihan yang sudah tercatat tidak berubah."
+                                keys={LAYANAN_KEYS} labels={LAYANAN_LABEL} defaults={DEFAULT_SERVICE_TARIFF}
+                                stored={settings?.tarifLayanan}
+                                onSave={(json) => saveMutation.mutate({ tarifLayanan: json })} saving={saveMutation.isPending} />
+                            <TariffEditor
+                                title="Tarif Kamar Rawat Inap (per hari)" icon={<BedDouble size={18} />}
+                                note="Dipakai saat pasien rawat inap dipulangkan (lama rawat × tarif kelas)."
+                                keys={KELAS_KAMAR} defaults={DEFAULT_ROOM_TARIFF}
+                                stored={settings?.tarifKamar}
+                                onSave={(json) => saveMutation.mutate({ tarifKamar: json })} saving={saveMutation.isPending} />
+                        </div>
+                    ))}
 
                     {activeTab === 'server' && (
                         <Card title="Info Sistem" icon={<Activity size={18} />}>

@@ -3,10 +3,12 @@ import { z } from 'zod';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../../db';
 import { settings } from '../../db/schemas/settings';
+import type { DbOrTx } from '../../db/types';
+import { DEFAULT_ROOM_TARIFF, DEFAULT_SERVICE_TARIFF, parseTariff, type LayananKey } from '../../../../shared/tariff';
 import { requireAuth, requireRole } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/error';
 import { validate } from '../../middleware/validate';
-import { ROLE_GROUPS } from '../../utils/roles';
+
 
 const router = Router();
 
@@ -20,37 +22,20 @@ const PUBLIC_DEFAULTS: Record<string, string> = {
 const PUBLIC_KEYS = ['namaRS', 'alamatRS', 'jamLayanan'];
 
 // Only these keys may be written; anything else in the payload is ignored.
-const ALLOWED_KEYS = ['namaRS', 'alamatRS', 'jamLayanan', 'tarifKamar', 'maxPercobaanLogin'];
+const ALLOWED_KEYS = ['namaRS', 'alamatRS', 'jamLayanan', 'tarifKamar', 'tarifLayanan'];
 
-// Room tariff per class per day (IDR) — fallback when no valid tarifKamar setting exists.
-export const DEFAULT_ROOM_TARIFF: Record<string, number> = {
-    'Kelas 1': 500000, 'Kelas 2': 350000, 'Kelas 3': 200000,
-    'VIP': 750000, 'HCU': 750000, 'ICU': 1000000,
-};
+async function readSetting(conn: DbOrTx, key: string): Promise<string | null> {
+    const rows = await conn.select().from(settings).where(eq(settings.key, key)).limit(1);
+    return rows[0]?.value ?? null;
+}
 
-/**
- * Room tariffs from the tarifKamar setting (JSON object: kelas -> tarif/hari).
- * Falls back to DEFAULT_ROOM_TARIFF when unset, invalid JSON, or non-numeric values;
- * numeric entries are merged over the defaults so missing classes keep their default.
- */
-export const getRoomTariffs = async (): Promise<Record<string, number>> => {
-    try {
-        const rows = await db.select().from(settings).where(eq(settings.key, 'tarifKamar')).limit(1);
-        if (!rows.length) return DEFAULT_ROOM_TARIFF;
+/** Room tariff per class per day, from the `tarifKamar` setting merged over defaults. */
+export const getRoomTariffs = async (conn: DbOrTx = db): Promise<Record<string, number>> =>
+    parseTariff(await readSetting(conn, 'tarifKamar'), DEFAULT_ROOM_TARIFF);
 
-        const parsed = JSON.parse(rows[0].value);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return DEFAULT_ROOM_TARIFF;
-
-        const tariffs: Record<string, number> = { ...DEFAULT_ROOM_TARIFF };
-        for (const [kelas, tarif] of Object.entries(parsed)) {
-            const n = Number(tarif);
-            if (Number.isFinite(n) && n >= 0) tariffs[kelas] = n;
-        }
-        return tariffs;
-    } catch {
-        return DEFAULT_ROOM_TARIFF;
-    }
-};
+/** Per-service tariffs (konsultasi, lab, radiologi), from the `tarifLayanan` setting merged over defaults. */
+export const getServiceTariffs = async (conn: DbOrTx = db): Promise<Record<LayananKey, number>> =>
+    parseTariff(await readSetting(conn, 'tarifLayanan'), DEFAULT_SERVICE_TARIFF);
 
 // Public display settings for kiosk / queue ticket — no auth required.
 router.get('/public', asyncHandler(async (_req, res) => {
@@ -61,7 +46,7 @@ router.get('/public', asyncHandler(async (_req, res) => {
 }));
 
 // All settings as key -> value — admin only.
-router.get('/', requireAuth, requireRole(...ROLE_GROUPS.admin), asyncHandler(async (_req, res) => {
+router.get('/', requireAuth, requireRole('admin'), asyncHandler(async (_req, res) => {
     const rows = await db.select().from(settings);
     const result: Record<string, string> = {};
     for (const row of rows) result[row.key] = row.value;
@@ -78,7 +63,7 @@ const saveSchema = z.object({
 });
 
 // Upsert settings — admin only. Non-whitelisted keys are silently ignored.
-router.put('/', requireAuth, requireRole(...ROLE_GROUPS.admin), validate(saveSchema), asyncHandler(async (req, res) => {
+router.put('/', requireAuth, requireRole('admin'), validate(saveSchema), asyncHandler(async (req, res) => {
     const requested: Record<string, string> = req.body.settings;
     const allowed = Object.keys(requested).filter((key) => ALLOWED_KEYS.includes(key));
 

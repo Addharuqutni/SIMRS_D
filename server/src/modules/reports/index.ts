@@ -1,28 +1,29 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../../db';
-import { billings, transactions } from '../../db/schemas/billing';
+import { billings, billingItems, transactions } from '../../db/schemas/billing';
 import { visits, patients } from '../../db/schemas/patient';
 import { emrSoap } from '../../db/schemas/clinical';
 import { prescriptions } from '../../db/schemas/services';
 import { icd10Codes } from '../../db/schemas/icd10';
 import { requireAuth, requireRole } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/error';
-import { ROLE_GROUPS } from '../../utils/roles';
+import { sendCsv } from '../../utils/csv';
+import { DomainError } from '../../utils/domain-error';
+
 import { desc, sql, gte, lte, lt, and, eq, ne, isNull, inArray } from 'drizzle-orm';
 
 const router = Router();
 
-const sendCsv = (res: Response, filename: string, header: string[], rows: (string | number)[][]) => {
-    const csvRows = [header.join(',')];
-    for (const row of rows) {
-        csvRows.push(row.join(','));
-    }
-    const csvContent = csvRows.join('\n');
+const MAX_EXPORT_DAYS = 366;
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(csvContent);
-};
+/** Reads `startDate`/`endDate` (default: last 30 days) and rejects ranges over a year. */
+function readRange(req: Request): { start: Date; end: Date } {
+    const end = req.query.endDate ? new Date(String(req.query.endDate)) : new Date();
+    const start = req.query.startDate ? new Date(String(req.query.startDate)) : new Date(end.getTime() - 30 * 86_400_000);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) throw new DomainError('Rentang tanggal tidak valid', 400);
+    if (end.getTime() - start.getTime() > MAX_EXPORT_DAYS * 86_400_000) throw new DomainError('Rentang ekspor maksimal 1 tahun', 400);
+    return { start, end };
+}
 
 // GET /api/v1/reports/dashboard — summary stats for the landing page (all roles)
 router.get('/dashboard', requireAuth, asyncHandler(async (req: Request, res: Response) => {
@@ -91,7 +92,7 @@ router.get('/dashboard', requireAuth, asyncHandler(async (req: Request, res: Res
 }));
 
 // GET /api/v1/reports/finance/summary
-router.get('/finance/summary', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req: Request, res: Response) => {
+router.get('/finance/summary', requireAuth, requireRole('billing'), asyncHandler(async (req: Request, res: Response) => {
     const { startDate, endDate } = req.query;
 
     let conditions = [];
@@ -122,58 +123,65 @@ router.get('/finance/summary', requireAuth, requireRole(...ROLE_GROUPS.billing),
     });
 }));
 
-// GET /api/v1/reports/finance/export-csv
-router.get('/finance/export-csv', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req: Request, res: Response) => {
-    const { startDate, endDate } = req.query;
+// GET /api/v1/reports/finance/monthly?months=6 — ledger totals per month per jenis (oldest first)
+router.get('/finance/monthly', requireAuth, requireRole('billing'), asyncHandler(async (req: Request, res: Response) => {
+    const months = Math.min(24, Math.max(1, Number(req.query.months) || 6));
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+    const bulan = sql<string>`to_char(date_trunc('month', ${transactions.tanggal}), 'YYYY-MM')`;
 
-    let conditions = [];
-    if (startDate) conditions.push(gte(transactions.tanggal, new Date(startDate as string)));
-    if (endDate) conditions.push(lte(transactions.tanggal, new Date(endDate as string)));
-
-    const data = await db
-        .select()
+    const rows = await db.select({ bulan, jenis: transactions.jenis, total: sql<number>`sum(${transactions.jumlah})::int` })
         .from(transactions)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .orderBy(desc(transactions.tanggal));
+        .where(gte(transactions.tanggal, from))
+        .groupBy(bulan, transactions.jenis);
 
-    sendCsv(
-        res,
-        `finance_report_${new Date().toISOString().split('T')[0]}.csv`,
-        ['ID', 'Kategori', 'Keterangan', 'Jenis', 'Jumlah', 'Tanggal'],
-        data.map((row) => [
-            row.id,
-            `"${row.kategori}"`,
-            `"${row.keterangan || ''}"`,
-            row.jenis,
-            row.jumlah,
-            new Date(row.tanggal).toISOString()
-        ])
-    );
+    const series = Array.from({ length: months }, (_, i) => {
+        const d = new Date(from.getFullYear(), from.getMonth() + i, 1);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const of = (jenis: string) => Number(rows.find((r) => r.bulan === key && r.jenis === jenis)?.total ?? 0);
+        return { bulan: key, pendapatan: of('pendapatan'), piutang: of('piutang'), biaya: of('biaya') };
+    });
+    res.json({ data: series });
 }));
 
-// GET /api/v1/reports/visits/export-csv
-router.get('/visits/export-csv', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req: Request, res: Response) => {
-    const data = await db.select().from(visits).orderBy(desc(visits.waktuDaftar));
+// GET /api/v1/reports/finance/by-category — settled revenue split by billing item kategori
+router.get('/finance/by-category', requireAuth, requireRole('billing'), asyncHandler(async (_req: Request, res: Response) => {
+    const rows = await db.select({ kategori: billingItems.kategori, total: sql<number>`sum(${billingItems.subtotal})::int` })
+        .from(billingItems)
+        .innerJoin(billings, eq(billingItems.billingId, billings.id))
+        .where(eq(billings.status, 'paid'))
+        .groupBy(billingItems.kategori)
+        .orderBy(desc(sql`sum(${billingItems.subtotal})`));
+    res.json({ data: rows.map((r) => ({ kategori: r.kategori, total: Number(r.total) })) });
+}));
 
-    sendCsv(
-        res,
-        `visits_report_${new Date().toISOString().split('T')[0]}.csv`,
+// GET /api/v1/reports/finance/export-csv?startDate=&endDate=
+router.get('/finance/export-csv', requireAuth, requireRole('billing'), asyncHandler(async (req: Request, res: Response) => {
+    const { start, end } = readRange(req);
+    const data = await db.select().from(transactions)
+        .where(and(gte(transactions.tanggal, start), lte(transactions.tanggal, end)))
+        .orderBy(desc(transactions.tanggal));
+
+    sendCsv(res, `finance_report_${new Date().toISOString().split('T')[0]}.csv`,
+        ['ID', 'Kategori', 'Keterangan', 'Jenis', 'Jumlah', 'Referensi', 'Tanggal'],
+        data.map((row) => [row.id, row.kategori, row.keterangan, row.jenis, row.jumlah, row.referensi, row.tanggal]));
+}));
+
+// GET /api/v1/reports/visits/export-csv?startDate=&endDate=
+router.get('/visits/export-csv', requireAuth, requireRole('billing'), asyncHandler(async (req: Request, res: Response) => {
+    const { start, end } = readRange(req);
+    const data = await db.select().from(visits)
+        .where(and(gte(visits.waktuDaftar, start), lte(visits.waktuDaftar, end)))
+        .orderBy(desc(visits.waktuDaftar));
+
+    sendCsv(res, `visits_report_${new Date().toISOString().split('T')[0]}.csv`,
         ['ID Visit', 'Patient ID', 'Poli ID', 'Dokter ID', 'Jaminan', 'Status', 'Waktu Daftar'],
-        data.map((row) => [
-            row.id,
-            row.patientId,
-            `"${row.poliId}"`,
-            `"${row.dokterId}"`,
-            `"${row.jaminan}"`,
-            `"${row.status}"`,
-            new Date(row.waktuDaftar).toISOString()
-        ])
-    );
+        data.map((row) => [row.id, row.patientId, row.poliId, row.dokterId, row.jaminan, row.status, row.waktuDaftar]));
 }));
 
 // GET /api/v1/reports/rl?year=&month=            -> JSON RL-style monthly per-poli visit counts
 // GET /api/v1/reports/rl?year=&month=&format=csv  -> CSV download (rl_<year>_<month>.csv)
-router.get('/rl', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req: Request, res: Response) => {
+router.get('/rl', requireAuth, requireRole('billing'), asyncHandler(async (req: Request, res: Response) => {
     const now = new Date();
     const year = parseInt(req.query.year as string, 10) || now.getFullYear();
     const month = parseInt(req.query.month as string, 10) || now.getMonth() + 1;
@@ -217,7 +225,7 @@ router.get('/rl', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler
 
     if (req.query.format === 'csv') {
         const csvRows = Object.entries(grouped).flatMap(([key, list]) =>
-            list.map(item => [`"${TIPE_LABELS[key] ?? 'Lainnya'}"`, `"${item.poli}"`, item.jumlah])
+            list.map(item => [TIPE_LABELS[key] ?? 'Lainnya', item.poli, item.jumlah])
         );
         return sendCsv(res, `rl_${year}_${month}.csv`, ['Jenis Kunjungan', 'Poli', 'Jumlah Kunjungan'], csvRows);
     }
@@ -237,7 +245,7 @@ router.get('/rl', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler
 
 // GET /api/v1/reports/rl2b?year=&month=            -> JSON RL 2b morbiditas per diagnosa (ICD-10)
 // GET /api/v1/reports/rl2b?year=&month=&format=csv  -> CSV download (rl2b_<year>_<month>.csv)
-router.get('/rl2b', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandler(async (req: Request, res: Response) => {
+router.get('/rl2b', requireAuth, requireRole('billing'), asyncHandler(async (req: Request, res: Response) => {
     const now = new Date();
     const year = parseInt(req.query.year as string, 10) || now.getFullYear();
     const month = parseInt(req.query.month as string, 10) || now.getMonth() + 1;
@@ -292,11 +300,7 @@ router.get('/rl2b', requireAuth, requireRole(...ROLE_GROUPS.billing), asyncHandl
     if (req.query.format === 'csv') {
         return sendCsv(res, `rl2b_${year}_${month}.csv`,
             ['Kode ICD-10', 'Deskripsi', 'Jumlah Kasus'],
-            diagnosa.map(d => [
-                `"${d.code}"`,
-                `"${d.description.replace(/"/g, '""')}"`,
-                d.jumlah,
-            ])
+            diagnosa.map(d => [d.code, d.description, d.jumlah])
         );
     }
 

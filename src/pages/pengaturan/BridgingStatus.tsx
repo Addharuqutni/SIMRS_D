@@ -1,38 +1,32 @@
-import { useQuery } from '@tanstack/react-query';
 import { Globe, RefreshCcw, CheckCircle2, XCircle, Clock, Activity, AlertTriangle } from 'lucide-react';
 import { Card, Button, StatusBadge } from '../../components/ui';
 import styles from '../registrasi/registrasi.module.css';
-import { api } from '../../lib/axios';
+import { useBridgingStatus } from '../../hooks/useBpjs';
+import { errorMessage } from '../../lib/api-error';
 
 const BPJS_BASE_URL_DEFAULT = 'https://apijkn.bpjs-kesehatan.go.id';
 
-interface BridgingStatusData {
-    mode: 'mock' | 'real';
-    configPresent: {
-        consId: boolean;
-        secretKey: boolean;
-        userKey: boolean;
-        baseUrl: string;
-    };
-    lastCall: {
-        at: string;
-        ok: boolean;
-        latencyMs: number;
-        error?: string;
-    } | null;
-}
+const MODE_COPY = {
+    real: {
+        variant: 'success' as const,
+        label: 'Real (Production)',
+        detail: 'Semua kredensial BPJS terpasang di server — permintaan VClaim diteruskan ke Web Service BPJS yang sebenarnya.',
+    },
+    simulasi: {
+        variant: 'warning' as const,
+        label: 'Mode Simulasi',
+        detail: 'Kredensial BPJS belum lengkap di server — modul VClaim berjalan dengan adapter simulasi lokal (tidak menghubungi server BPJS). SEP yang terbit ditandai SIMULASI.',
+    },
+    nonaktif: {
+        variant: 'danger' as const,
+        label: 'Belum Dikonfigurasi',
+        detail: 'Server berjalan di lingkungan produksi tanpa kredensial BPJS. Permintaan VClaim DITOLAK (HTTP 503) — tidak ada fallback ke mode simulasi.',
+    },
+};
 
 export function BridgingStatus() {
-    const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-        queryKey: ['vclaim-status'],
-        queryFn: async (): Promise<BridgingStatusData> => {
-            const res = await api.get('/vclaim/status');
-            return res.data.data;
-        },
-        refetchInterval: 30000,
-    });
-
-    const isReal = data?.mode === 'real';
+    const { data, isLoading, isError, error, refetch, isFetching } = useBridgingStatus();
+    const mode = data ? MODE_COPY[data.mode] : MODE_COPY.simulasi;
 
     const configRows = data
         ? [
@@ -63,7 +57,7 @@ export function BridgingStatus() {
                 <Card title="Status Bridging VClaim BPJS" icon={<AlertTriangle size={18} />}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '16px 0', color: 'var(--danger, #dc2626)' }}>
                         <AlertTriangle size={18} />
-                        <span>Gagal memuat status bridging: {error instanceof Error ? error.message : 'kesalahan tidak diketahui'}</span>
+                        <span>{errorMessage(error, 'Gagal memuat status bridging')}</span>
                     </div>
                 </Card>
             )}
@@ -71,15 +65,9 @@ export function BridgingStatus() {
             {data && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <Card title="Status Bridging VClaim BPJS" icon={<Globe size={18} />}
-                        action={
-                            <StatusBadge variant={isReal ? 'success' : 'warning'}>
-                                {isReal ? 'Real (Production)' : 'Mock Mode'}
-                            </StatusBadge>
-                        }>
+                        action={<StatusBadge variant={mode.variant}>{mode.label}</StatusBadge>}>
                         <div style={{ fontSize: '14px', lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-                            {isReal
-                                ? 'Semua kredensial BPJS terpasang di server — permintaan VClaim diteruskan ke Web Service BPJS yang sebenarnya.'
-                                : 'Kredensial BPJS belum lengkap di server — modul VClaim berjalan dalam mode mock (simulasi lokal, tidak menghubungi server BPJS).'}
+                            {mode.detail}
                         </div>
                     </Card>
 
@@ -111,7 +99,7 @@ export function BridgingStatus() {
                         {!data.lastCall ? (
                             <div style={{ padding: '8px 0', fontSize: '14px', color: 'var(--text-muted)' }}>
                                 Belum ada panggilan ke server BPJS sejak server dimulai
-                                {!isReal && ' (mode mock tidak melakukan panggilan nyata)'}.
+                                {data.mode !== 'real' && ' (mode simulasi tidak melakukan panggilan nyata)'}.
                             </div>
                         ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
